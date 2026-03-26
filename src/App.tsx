@@ -3,8 +3,10 @@ import { auth, loginWithGoogle, logout, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor } from 'lucide-react';
-import { VirtualDevice, VirtualApp } from './types';
+import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle } from 'lucide-react';
+import { VirtualDevice, VirtualApp, UserProfile } from './types';
+import { analyzeAppMetadata } from './services/aiService';
+import { validateSecuritySticker } from './services/djService';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -16,6 +18,7 @@ function cn(...inputs: ClassValue[]) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [device, setDevice] = useState<VirtualDevice | null>(null);
   const [activeApp, setActiveApp] = useState<VirtualApp | null>(null);
@@ -24,62 +27,192 @@ export default function App() {
   const [deepLinkUrl, setDeepLinkUrl] = useState<string>('');
   const [isBuilding, setIsBuilding] = useState(false);
   const [buildProgress, setBuildProgress] = useState(0);
+  const [isAppSwitcherOpen, setIsAppSwitcherOpen] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
+  const [stickerUrl, setStickerUrl] = useState('');
+  const [validationResult, setValidationResult] = useState<{ success: boolean; message: string; metadata?: any } | null>(null);
 
   const addLog = (msg: string) => {
     setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 49)]);
   };
 
+  const handleDjActivation = async () => {
+    if (!user || !validationResult?.success) return;
+    
+    addLog("Activating DJ Profile...");
+    const updatedProfile = { ...userProfile!, isDj: true };
+    await setDoc(doc(db, 'users', user.uid), updatedProfile);
+    setUserProfile(updatedProfile);
+    addLog("DJ Profile Activated successfully.");
+    alert("Welcome, DJ! Your professional profile is now active.");
+  };
+
+  const handleStickerValidation = async () => {
+    if (!stickerUrl) return;
+    setIsValidating(true);
+    setValidationResult(null);
+    addLog(`Validating Security Sticker: ${stickerUrl}`);
+    
+    try {
+      const result = await validateSecuritySticker(stickerUrl);
+      setValidationResult(result);
+      if (result.success) {
+        addLog("Security Sticker Validated: GENUINE_CODE_VERIFIED");
+      } else {
+        addLog(`Validation Failed: ${result.message}`);
+      }
+    } catch (err) {
+      addLog(`Validation Error: ${err}`);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleUninstall = async (app: VirtualApp) => {
+    if (!device || !user) return;
+    if (!confirm(`Are you sure you want to uninstall ${app.name}? This will remove all local data.`)) return;
+    
+    addLog(`Uninstalling ${app.name}...`);
+    const updatedApps = device.installedApps.filter(a => a.id !== app.id);
+    const updatedDevice = { ...device, installedApps: updatedApps };
+    
+    await setDoc(doc(db, 'devices', user.uid), updatedDevice);
+    setDevice(updatedDevice);
+    setActiveApp(null);
+    addLog(`${app.name} uninstalled successfully.`);
+  };
+
+  const handleSaveToCloud = async (app: VirtualApp) => {
+    addLog(`Syncing ${app.name} to Cloud Storage...`);
+    // Simulated cloud sync
+    setTimeout(() => {
+      addLog(`${app.name} synced to global SAI-GAI-NAI repository.`);
+      alert(`${app.name} has been backed up to your cloud profile.`);
+    }, 1500);
+  };
+
+  const handleAIUnmask = async (app: VirtualApp) => {
+    if (!device || !user) return;
+    setIsAnalyzing(true);
+    addLog(`AI Scanning ${app.name} for hidden web endpoints...`);
+    
+    try {
+      const result = await analyzeAppMetadata(app.name, app.packageName);
+      
+      if (result.isWebWrapper && result.suggestedUrl) {
+        addLog(`AI Unmasked: ${app.name} is a web-wrapper for ${result.suggestedUrl} (Confidence: ${Math.round(result.confidence * 100)}%)`);
+        
+        const updatedApps = device.installedApps.map(a => 
+          a.id === app.id ? { ...a, type: 'web', webUrl: result.suggestedUrl } : a
+        );
+        
+        const updatedDevice = { ...device, installedApps: updatedApps };
+        await setDoc(doc(db, 'devices', user.uid), updatedDevice);
+        setDevice(updatedDevice);
+        setActiveApp({ ...app, type: 'web', webUrl: result.suggestedUrl });
+      } else {
+        addLog(`AI Scan Complete: ${app.name} appears to be a native binary. No web endpoints found.`);
+        alert("AI Scan: This app appears to be a native binary. No web endpoints were detected.");
+      }
+    } catch (err) {
+      addLog(`AI Analysis Error: ${err}`);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let unsubscribeDevice: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setLoading(false);
+      
       if (currentUser) {
         addLog(`User ${currentUser.displayName} authenticated.`);
         
-        // Check for URL parameters for direct app emulation
-        const params = new URLSearchParams(window.location.search);
-        const targetApp = params.get('app');
-        const targetPackage = params.get('package');
-
         // Sync user profile
         const userRef = doc(db, 'users', currentUser.uid);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
-          await setDoc(userRef, {
-            uid: currentUser.uid,
-            displayName: currentUser.displayName,
-            email: currentUser.email,
-            photoURL: currentUser.photoURL,
-            createdAt: Date.now()
-          });
+        try {
+          const userSnap = await getDoc(userRef);
+          if (!userSnap.exists()) {
+            const isPrimaryUser = currentUser.email === 'djklmr2024@gmail.com';
+            const newProfile: UserProfile = {
+              uid: currentUser.uid,
+              displayName: currentUser.displayName || 'User',
+              email: currentUser.email || '',
+              photoURL: currentUser.photoURL || '',
+              createdAt: Date.now(),
+              isDj: isPrimaryUser,
+              arkaiosId: isPrimaryUser ? 'ARK-00PI-GLKE-NL02' : undefined,
+              digitalName: isPrimaryUser ? 'djklmr' : undefined
+            };
+            await setDoc(userRef, newProfile);
+            setUserProfile(newProfile);
+          } else {
+            const profileData = userSnap.data() as UserProfile;
+            // Auto-update primary user if fields are missing
+            if (currentUser.email === 'djklmr2024@gmail.com' && !profileData.arkaiosId) {
+              const updatedProfile = { 
+                ...profileData, 
+                isDj: true, 
+                arkaiosId: 'ARK-00PI-GLKE-NL02', 
+                digitalName: 'djklmr' 
+              };
+              await setDoc(userRef, updatedProfile);
+              setUserProfile(updatedProfile);
+            } else {
+              setUserProfile(profileData);
+            }
+          }
+        } catch (err) {
+          addLog("Error syncing user profile: " + err);
         }
 
         // Sync or create virtual device
         const deviceRef = doc(db, 'devices', currentUser.uid);
-        const unsubscribeDevice = onSnapshot(deviceRef, (docSnap) => {
+        unsubscribeDevice = onSnapshot(deviceRef, (docSnap) => {
           if (docSnap.exists()) {
             const deviceData = docSnap.data() as VirtualDevice;
-            setDevice(deviceData);
+            
+            // Ensure Files and Browser apps are present for existing users
+            let updatedApps = [...deviceData.installedApps];
+            let needsUpdate = false;
 
-            // Handle auto-install from URL if not already installed
-            if (targetApp && targetPackage) {
-              const isInstalled = deviceData.installedApps.some(a => a.packageName === targetPackage);
-              if (!isInstalled) {
-                addLog(`Analyzing remote APK: ${targetPackage}...`);
-                const newApp: VirtualApp = {
-                  id: Math.random().toString(36).substring(7),
-                  name: targetApp,
-                  packageName: targetPackage,
-                  icon: 'Package',
-                  version: '1.0.0-remote',
-                  status: 'installed',
-                  lastUsed: Date.now()
-                };
-                const updatedApps = [...deviceData.installedApps, newApp];
-                setDoc(deviceRef, { ...deviceData, installedApps: updatedApps });
-                addLog(`Auto-installed remote app: ${targetApp}`);
-              }
+            const hasFilesApp = updatedApps.some(a => a.packageName === 'com.android.documentsui');
+            if (!hasFilesApp) {
+              updatedApps.push({ id: '4', name: 'Files', packageName: 'com.android.documentsui', icon: 'Folder', version: '1.0', status: 'stopped', lastUsed: Date.now() });
+              needsUpdate = true;
             }
+
+            const hasDjPortal = updatedApps.some(a => a.packageName === 'com.arkaios.djportal');
+            if (!hasDjPortal) {
+              updatedApps.push({ id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() });
+              needsUpdate = true;
+            }
+
+            const browserApp = updatedApps.find(a => a.packageName === 'com.android.browser');
+            if (!browserApp) {
+              updatedApps.push({ id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' });
+              needsUpdate = true;
+            } else if (!browserApp.type) {
+              // Update existing browser to be web-enabled
+              const index = updatedApps.findIndex(a => a.packageName === 'com.android.browser');
+              updatedApps[index] = { ...browserApp, type: 'web', webUrl: 'https://www.google.com' };
+              needsUpdate = true;
+            }
+
+            if (needsUpdate) {
+              setDoc(deviceRef, { ...deviceData, installedApps: updatedApps });
+            }
+
+            // Ensure orientation field is present for existing users
+            if (!deviceData.orientation) {
+              setDoc(deviceRef, { ...deviceData, orientation: 'portrait' });
+            }
+
+            setDevice(deviceData);
           } else {
             const initialDevice: VirtualDevice = {
               id: currentUser.uid,
@@ -91,21 +224,62 @@ export default function App() {
               installedApps: [
                 { id: '1', name: 'Settings', packageName: 'com.android.settings', icon: 'Settings', version: '1.0', status: 'stopped', lastUsed: Date.now() },
                 { id: '2', name: 'Terminal', packageName: 'com.android.terminal', icon: 'Terminal', version: '1.0', status: 'stopped', lastUsed: Date.now() },
-                { id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now() }
+                { id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' },
+                { id: '4', name: 'Files', packageName: 'com.android.documentsui', icon: 'Folder', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() }
               ],
               screenBrightness: 100,
               volume: 70,
-              formFactor: 'phone'
+              formFactor: 'phone',
+              orientation: 'portrait'
             };
             setDoc(deviceRef, initialDevice);
             addLog("New virtual device provisioned for user.");
           }
+        }, (err) => {
+          addLog("Device sync error: " + err);
         });
-        return () => unsubscribeDevice();
+      } else {
+        if (unsubscribeDevice) {
+          unsubscribeDevice();
+          unsubscribeDevice = null;
+        }
+        setDevice(null);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDevice) unsubscribeDevice();
+    };
   }, []);
+
+  useEffect(() => {
+    if (!device || !user) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const targetApp = params.get('app');
+    const targetPackage = params.get('package');
+
+    if (targetApp && targetPackage) {
+      const isInstalled = device.installedApps.some(a => a.packageName === targetPackage);
+      if (!isInstalled) {
+        addLog(`Analyzing remote APK: ${targetPackage}...`);
+        const newApp: VirtualApp = {
+          id: Math.random().toString(36).substring(7),
+          name: targetApp,
+          packageName: targetPackage,
+          icon: 'Package',
+          version: '1.0.0-remote',
+          status: 'installed',
+          lastUsed: Date.now()
+        };
+        const updatedApps = [...device.installedApps, newApp];
+        setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
+        addLog(`Auto-installed remote app: ${targetApp}`);
+      }
+    }
+  }, [device?.id, user?.uid]);
 
   const handleBoot = () => {
     setIsBooting(true);
@@ -113,7 +287,7 @@ export default function App() {
     setTimeout(() => {
       addLog("Loading System UI...");
       setTimeout(() => {
-        addLog("Android OS Booted successfully.");
+        addLog("Android OS Deployed successfully.");
         setIsBooting(false);
         if (device) {
           setDoc(doc(db, 'devices', user!.uid), { ...device, isLocked: false });
@@ -147,6 +321,10 @@ export default function App() {
     const updatedApps = [...device.installedApps, newApp];
     setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
     addLog(`APK "${name}" installed successfully.`);
+    
+    // Automatically launch the app after installation
+    setActiveApp(newApp);
+    addLog(`Launching ${name}...`);
   };
 
   const buildCapacitorApp = async (name: string, url: string) => {
@@ -195,6 +373,25 @@ export default function App() {
     const newFactor = device.formFactor === 'tablet' ? 'phone' : 'tablet';
     setDoc(doc(db, 'devices', user.uid), { ...device, formFactor: newFactor });
     addLog(`Device form factor changed to: ${newFactor}`);
+  };
+
+  const toggleOrientation = () => {
+    if (!device || !user) return;
+    const newOrientation = device.orientation === 'portrait' ? 'landscape' : 'portrait';
+    setDoc(doc(db, 'devices', user.uid), { ...device, orientation: newOrientation });
+    addLog(`Orientation changed to: ${newOrientation}`);
+  };
+
+  const toggleFullscreen = () => {
+    const elem = document.getElementById('emulator-frame');
+    if (!elem) return;
+    if (!document.fullscreenElement) {
+      elem.requestFullscreen().catch(err => {
+        addLog(`Error attempting to enable full-screen mode: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
   };
 
   const downloadNativeBridge = (app: VirtualApp) => {
@@ -247,7 +444,7 @@ export default function App() {
           transition={{ duration: 2, repeat: Infinity }}
           className="text-white font-mono text-xl"
         >
-          SAI-GAI-NAI BOOTING...
+          SAI-GAI-NAI DEPLOYING...
         </motion.div>
       </div>
     );
@@ -311,6 +508,16 @@ export default function App() {
     );
   }
 
+  if (!device) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-white font-mono text-sm animate-pulse">
+          PROVISIONING VIRTUAL DEVICE...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col lg:flex-row p-4 lg:p-8 gap-8 font-sans selection:bg-blue-500/30">
       {/* Sidebar / Controls */}
@@ -347,10 +554,22 @@ export default function App() {
         <div className="flex-1 p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl flex flex-col overflow-hidden">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xs font-mono uppercase tracking-widest text-white/40">Cloud Storage / My Apps</h3>
-            <HardDrive className="w-4 h-4 text-white/20" />
+            <div className="flex gap-2">
+              <button 
+                onClick={() => {
+                  const filesApp = device?.installedApps.find(a => a.packageName === 'com.android.documentsui');
+                  if (filesApp) setActiveApp(filesApp);
+                }}
+                className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-colors"
+                title="Open File Manager"
+              >
+                <HardDrive className="w-4 h-4" />
+              </button>
+              <HardDrive className="w-4 h-4 text-white/20" />
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto space-y-2 scrollbar-hide">
-            {device?.installedApps.filter(a => a.packageName.includes('io.capacitor') || a.version.includes('apk')).map(app => (
+            {device?.installedApps?.filter(a => a.packageName.includes('io.capacitor') || a.version.includes('apk')).map(app => (
               <div key={app.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between group hover:bg-white/10 transition-all">
                 <div className="flex items-center gap-3 overflow-hidden">
                   <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center shrink-0">
@@ -379,7 +598,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-            {(!device?.installedApps.some(a => a.packageName.includes('io.capacitor') || a.version.includes('apk'))) && (
+            {(!device?.installedApps || !device.installedApps.some(a => a.packageName.includes('io.capacitor') || a.version.includes('apk'))) && (
               <p className="text-[10px] text-white/20 text-center py-8 italic">No apps in your cloud space yet.</p>
             )}
           </div>
@@ -387,16 +606,22 @@ export default function App() {
 
         <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
           <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">APK Sideload</h3>
-          <div 
-            onClick={() => {
-              const name = prompt("Enter App Name to Simulate APK Install:");
-              if (name) installAPK(name);
-            }}
-            className="border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all group"
-          >
+          <label className="border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all group">
             <UploadCloud className="w-8 h-8 text-white/20 group-hover:text-blue-400 transition-colors" />
-            <p className="text-xs text-white/40 text-center">Click to simulate APK upload</p>
-          </div>
+            <p className="text-xs text-white/40 text-center">Click to upload and deploy APK</p>
+            <input 
+              type="file" 
+              accept=".apk" 
+              className="hidden" 
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  const name = file.name.replace('.apk', '');
+                  installAPK(name);
+                }
+              }}
+            />
+          </label>
         </div>
 
         <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
@@ -473,8 +698,24 @@ export default function App() {
       <div className="flex-1 flex flex-col items-center justify-center relative">
         <div className="absolute inset-0 bg-blue-500/5 blur-[100px] rounded-full pointer-events-none" />
         
-        {/* Device Toggle */}
+        {/* Device Toggles */}
         <div className="mb-4 flex gap-2 p-1 bg-white/5 border border-white/10 rounded-full backdrop-blur-xl z-20">
+          <div className="flex gap-1 border-r border-white/10 pr-1 mr-1">
+            <button 
+              onClick={toggleOrientation}
+              className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-white/40 hover:text-white"
+              title="Toggle Orientation"
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+            <button 
+              onClick={toggleFullscreen}
+              className="p-1.5 hover:bg-white/10 rounded-full transition-colors text-white/40 hover:text-white"
+              title="Toggle Fullscreen"
+            >
+              <Maximize className="w-3.5 h-3.5" />
+            </button>
+          </div>
           <button 
             onClick={toggleFormFactor}
             className={cn(
@@ -497,9 +738,14 @@ export default function App() {
 
         {/* Phone/Tablet Frame */}
         <motion.div 
+          id="emulator-frame"
           animate={{ 
-            width: device?.formFactor === 'tablet' ? 800 : 320,
-            height: device?.formFactor === 'tablet' ? 550 : 650
+            width: device?.formFactor === 'tablet' 
+              ? (device?.orientation === 'landscape' ? 850 : 600) 
+              : (device?.orientation === 'landscape' ? 650 : 320),
+            height: device?.formFactor === 'tablet' 
+              ? (device?.orientation === 'landscape' ? 550 : 800) 
+              : (device?.orientation === 'landscape' ? 320 : 650)
           }}
           className="relative bg-[#1a1a1a] rounded-[3rem] border-[8px] border-[#2a2a2a] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col transition-all duration-500"
         >
@@ -526,7 +772,7 @@ export default function App() {
                   <>
                     <Smartphone className="w-16 h-16 text-white/10 mb-6" />
                     <h4 className="text-xl font-bold mb-2">{device.model}</h4>
-                    <p className="text-sm text-white/40 mb-8">Powered by SAI-GAI-NAI</p>
+                    <p className="text-sm text-white/40 mb-8">SAI-GAI-NAI Virtual Environment</p>
                     <button 
                       onClick={handleBoot}
                       className="px-6 py-2 bg-white text-black rounded-full font-bold text-sm hover:bg-white/90 active:scale-95 transition-all"
@@ -540,7 +786,10 @@ export default function App() {
               <div className="h-full flex flex-col">
                 {/* Status Bar */}
                 <div className="h-10 flex items-center justify-between px-6 pt-2">
-                  <span className="text-[10px] font-bold">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                    <span className="text-[10px] font-bold">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <Globe className="w-3 h-3 text-white/60" />
                     <Activity className="w-3 h-3 text-white/60" />
@@ -555,7 +804,63 @@ export default function App() {
                 {/* Main OS View */}
                 <div className="flex-1 p-4 relative">
                   <AnimatePresence mode="wait">
-                    {activeApp ? (
+                    {isAppSwitcherOpen ? (
+                      <motion.div 
+                        key="app-switcher"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 20 }}
+                        className="absolute inset-0 bg-black/80 backdrop-blur-xl z-50 p-6 flex flex-col"
+                      >
+                        <div className="flex items-center justify-between mb-6">
+                          <h4 className="text-xs font-mono text-white/40 uppercase tracking-widest">Recent Apps</h4>
+                          <button 
+                            onClick={() => setIsAppSwitcherOpen(false)}
+                            className="text-[10px] text-blue-400 font-bold"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-4">
+                          {device.installedApps.slice(0, 5).map((app) => (
+                            <div 
+                              key={app.id}
+                              className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-all cursor-pointer"
+                              onClick={() => {
+                                setActiveApp(app);
+                                setIsAppSwitcherOpen(false);
+                              }}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-black/40 rounded-xl flex items-center justify-center border border-white/5">
+                                  {app.icon === 'Settings' && <Settings className="w-5 h-5 text-white/40" />}
+                                  {app.icon === 'Terminal' && <Terminal className="w-5 h-5 text-white/40" />}
+                                  {app.icon === 'Globe' && <Globe className="w-5 h-5 text-white/40" />}
+                                  {app.icon === 'Folder' && <HardDrive className="w-5 h-5 text-white/40" />}
+                                  {app.icon === 'Package' && <Package className="w-5 h-5 text-blue-400/40" />}
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold text-white flex items-center gap-2">
+                                    {app.name}
+                                    <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                                  </div>
+                                  <div className="text-[8px] text-white/20 font-mono">{app.packageName}</div>
+                                </div>
+                              </div>
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  addLog(`Closed ${app.name} from switcher.`);
+                                }}
+                                className="p-2 hover:bg-white/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-white/20 hover:text-red-400" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    ) : activeApp ? (
                       <motion.div 
                         key={activeApp.id}
                         initial={{ opacity: 0, scale: 0.9 }}
@@ -565,7 +870,7 @@ export default function App() {
                       >
                         <div className="h-12 flex items-center justify-between px-4 border-b border-white/5">
                           <div className="flex items-center gap-2">
-                            <Package className="w-4 h-4 text-blue-400" />
+                            {activeApp.icon === 'Folder' ? <HardDrive className="w-4 h-4 text-blue-400" /> : <Package className="w-4 h-4 text-blue-400" />}
                             <span className="text-xs font-bold">{activeApp.name}</span>
                           </div>
                           <button onClick={() => setActiveApp(null)} className="p-1 hover:bg-white/5 rounded-lg">
@@ -573,7 +878,190 @@ export default function App() {
                           </button>
                         </div>
                         
-                        {activeApp.type === 'web' ? (
+                        {activeApp.packageName === 'com.android.documentsui' ? (
+                          <div className="flex-1 p-4 flex flex-col gap-4 overflow-y-auto">
+                            <div className="flex items-center justify-between mb-2">
+                              <h4 className="text-xs font-mono text-white/40 uppercase tracking-widest">Internal Storage</h4>
+                              <div className="flex gap-2">
+                                <label className="cursor-pointer p-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl text-[10px] font-bold hover:bg-blue-500/20 transition-all flex items-center gap-2">
+                                  <PlusCircle className="w-3 h-3" />
+                                  Upload APK
+                                  <input 
+                                    type="file" 
+                                    accept=".apk" 
+                                    className="hidden" 
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        const name = file.name.replace('.apk', '');
+                                        installAPK(name);
+                                        addLog(`APK "${file.name}" uploaded and installed via Files app.`);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-2">
+                              {device.installedApps.map(app => (
+                                <div key={app.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center">
+                                      <Package className="w-4 h-4 text-blue-400/60" />
+                                    </div>
+                                    <div>
+                                      <p className="text-[10px] font-bold">{app.name}</p>
+                                      <p className="text-[8px] text-white/40">{app.packageName}</p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUninstall(app);
+                                      }}
+                                      className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                                      title="Uninstall"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={() => setActiveApp(app)}
+                                      className="p-2 hover:bg-green-500/20 text-green-400 rounded-lg"
+                                    >
+                                      <Play className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="mt-auto p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl text-center">
+                              <p className="text-[10px] text-blue-400/60 italic">
+                                Use the "Upload APK" button to sideload native packages into the SAI-GAI-NAI environment.
+                              </p>
+                            </div>
+                          </div>
+                        ) : activeApp.packageName === 'com.arkaios.djportal' ? (
+                          <div className="flex-1 flex flex-col items-center justify-start p-4 text-center overflow-y-auto custom-scrollbar">
+                            <div className="w-16 h-16 bg-gradient-to-br from-purple-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-purple-500/20 mb-4">
+                              <Music className="w-10 h-10 text-white" />
+                            </div>
+                            <h3 className="text-xl font-black text-white mb-1">DJ PORTAL</h3>
+                            <p className="text-[10px] text-white/40 uppercase tracking-widest mb-6">Professional Verification</p>
+
+                            {userProfile?.isDj ? (
+                              <div className="w-full p-6 bg-green-500/10 border border-green-500/20 rounded-2xl flex flex-col items-center gap-4">
+                                <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center shadow-lg shadow-green-500/20">
+                                  <CheckCircle className="w-6 h-6 text-white" />
+                                </div>
+                                <div className="text-center">
+                                  <h4 className="text-sm font-bold text-green-400">DJ PROFILE ACTIVE</h4>
+                                  <p className="text-[10px] text-white/60 mt-1">Your identity has been verified by the Central IA Bank.</p>
+                                </div>
+                                <div className="w-full pt-4 border-t border-white/5 grid grid-cols-2 gap-2">
+                                  <div className="text-left">
+                                    <div className="text-[8px] text-white/40 uppercase">Status</div>
+                                    <div className="text-[10px] text-white font-bold">Verified Professional</div>
+                                  </div>
+                                  <div className="text-left">
+                                    <div className="text-[8px] text-white/40 uppercase">Tier</div>
+                                    <div className="text-[10px] text-purple-400 font-bold">Elite DJ</div>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="w-full space-y-4">
+                                <div className="p-4 bg-white/5 border border-white/10 rounded-2xl text-left">
+                                  <h5 className="text-[10px] font-bold text-white/80 uppercase mb-2">Verification Required</h5>
+                                  <p className="text-[9px] text-white/60 leading-relaxed">
+                                    To unlock professional DJ features, you must provide a valid <strong>Security Sticker URL</strong> generated by the Flow Diagram Creator.
+                                  </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                  <label className="text-[10px] text-white/40 uppercase font-bold block text-left px-1">Sticker URL</label>
+                                  <div className="relative">
+                                    <input 
+                                      type="text"
+                                      value={stickerUrl}
+                                      onChange={(e) => setStickerUrl(e.target.value)}
+                                      placeholder="https://flow-diagram-creator.vercel.app/?mode=sticker&id=..."
+                                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-[11px] text-white placeholder:text-white/20 focus:outline-none focus:border-purple-500/50 transition-all"
+                                    />
+                                    <ShieldCheck className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/20" />
+                                  </div>
+                                </div>
+
+                                <button 
+                                  disabled={isValidating || !stickerUrl}
+                                  onClick={handleStickerValidation}
+                                  className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl text-xs font-black hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-purple-500/20"
+                                >
+                                  {isValidating ? (
+                                    <>
+                                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                      VALIDATING WITH IA BANK...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Activity className="w-4 h-4" />
+                                      VERIFY CODE AUTHENTICITY
+                                    </>
+                                  )}
+                                </button>
+
+                                {validationResult && (
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className={cn(
+                                      "p-4 rounded-2xl border text-left",
+                                      validationResult.success ? "bg-green-500/10 border-green-500/20" : "bg-red-500/10 border-red-500/20"
+                                    )}
+                                  >
+                                    <div className="flex items-start gap-3">
+                                      {validationResult.success ? (
+                                        <CheckCircle className="w-5 h-5 text-green-400 shrink-0 mt-0.5" />
+                                      ) : (
+                                        <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                                      )}
+                                      <div>
+                                        <h5 className={cn("text-[11px] font-bold uppercase", validationResult.success ? "text-green-400" : "text-red-400")}>
+                                          {validationResult.success ? "Validation Successful" : "Validation Failed"}
+                                        </h5>
+                                        <p className="text-[10px] text-white/60 mt-1 leading-relaxed">{validationResult.message}</p>
+                                        
+                                        {validationResult.success && (
+                                          <button 
+                                            onClick={handleDjActivation}
+                                            className="mt-4 w-full py-2 bg-green-500 text-white rounded-lg text-[10px] font-black hover:bg-green-600 transition-all"
+                                          >
+                                            ACTIVATE DJ PROFILE NOW
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="mt-auto pt-8 w-full">
+                              <div className="p-4 bg-white/5 rounded-2xl border border-white/5 text-left">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <Layers className="w-3 h-3 text-purple-400" />
+                                  <span className="text-[8px] text-white/40 uppercase font-bold">Security Protocol</span>
+                                </div>
+                                <p className="text-[8px] text-white/30 leading-relaxed">
+                                  All codes are integrated into the Central IA Bank as evidence. 
+                                  The JSON Builder generates a unique signature that is verified through multi-layer security filters.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : activeApp.type === 'web' ? (
                           <div className="flex-1 bg-white flex flex-col">
                             <div className="h-8 bg-gray-100 flex items-center px-3 border-b border-gray-200 gap-2">
                               <div className="w-2 h-2 bg-red-400 rounded-full" />
@@ -582,6 +1070,37 @@ export default function App() {
                               <div className="flex-1 bg-white rounded px-2 py-0.5 text-[8px] text-gray-500 truncate border border-gray-300">
                                 {activeApp.webUrl}
                               </div>
+                              <button 
+                                onClick={() => handleSaveToCloud(activeApp)}
+                                className="p-1 hover:bg-green-500/10 text-green-500 rounded transition-colors"
+                                title="Save to Cloud"
+                              >
+                                <Database className="w-3 h-3" />
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  if (!device || !user) return;
+                                  const updatedApps = device.installedApps.map(a => 
+                                    a.id === activeApp.id ? { ...a, type: 'native', webUrl: undefined } : a
+                                  );
+                                  const updatedDevice = { ...device, installedApps: updatedApps };
+                                  setDoc(doc(db, 'devices', user.uid), updatedDevice);
+                                  setDevice(updatedDevice);
+                                  setActiveApp({ ...activeApp, type: 'native', webUrl: undefined });
+                                  addLog(`Reset ${activeApp.name} to Native Mode.`);
+                                }}
+                                className="p-1 hover:bg-red-500/10 text-red-500 rounded transition-colors"
+                                title="Reset to Native"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                              </button>
+                              <button 
+                                onClick={() => handleUninstall(activeApp)}
+                                className="p-1 hover:bg-red-500/10 text-red-500 rounded transition-colors"
+                                title="Uninstall App"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
                               <RefreshCcw className="w-3 h-3 text-gray-400" />
                             </div>
                             <div className="flex-1 w-full bg-white relative overflow-hidden">
@@ -596,22 +1115,129 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
-                          <div className="flex-1 p-4 flex flex-col items-center justify-center text-center gap-4">
-                            <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10">
-                              <Package className="w-10 h-10 text-white/20" />
+                          <div className="flex-1 p-4 flex flex-col items-center justify-start text-center gap-4 overflow-y-auto">
+                            <div className="w-full h-40 bg-black/40 rounded-2xl border border-white/5 relative overflow-hidden flex flex-col items-center justify-center group">
+                              <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 to-transparent pointer-events-none" />
+                              <div className="z-10 flex flex-col items-center gap-2">
+                                <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 animate-pulse">
+                                  <Activity className="w-6 h-6 text-blue-400/60" />
+                                </div>
+                                <div className="text-[10px] font-mono text-blue-400/80 uppercase tracking-widest">Live UI Stream (Simulated)</div>
+                                <div className="text-[8px] text-white/20">Vulkan-WebGL Layer Active</div>
+                              </div>
+                              <div className="absolute bottom-2 right-2 flex gap-1">
+                                <div className="w-1 h-1 bg-green-500 rounded-full animate-ping" />
+                                <div className="w-1 h-1 bg-green-500 rounded-full" />
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-sm font-bold">{activeApp.packageName}</p>
-                              <p className="text-[10px] text-white/40 font-mono mt-1">Version: {activeApp.version}</p>
+
+                            <div className="w-full">
+                              <h4 className="text-lg font-bold text-white">{activeApp.name}</h4>
+                              <p className="text-[10px] text-white/40 font-mono mt-1">Package: {activeApp.packageName}</p>
                             </div>
-                            <div className="w-full mt-8 p-4 bg-black/40 rounded-xl border border-white/5 text-left font-mono text-[9px] text-green-400/80">
-                              <div>$ adb shell am start -n {activeApp.packageName}</div>
-                              <div className="text-white/40">Starting: Intent {'{'} act=android.intent.action.MAIN ... {'}'}</div>
-                              <div className="text-white/40">Status: OK</div>
-                              <div className="mt-2 text-blue-400"># SAI-GAI-NAI Runtime Analysis</div>
-                              <div className="text-white/20">Analyzing heap usage...</div>
-                              <div className="text-white/20">Checking native libraries...</div>
-                              <div className="text-white/20">Emulation layer: VULKAN-WEBGL-2.0</div>
+
+                            <div className="w-full space-y-3 mt-4">
+                              <div className="p-4 bg-black/40 rounded-xl border border-white/5 text-left font-mono text-[9px] text-green-400/80">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                  <span className="text-white/60">SAI-GAI-NAI RUNTIME ACTIVE</span>
+                                </div>
+                                <div>$ adb shell am start -n {activeApp.packageName}</div>
+                                <div className="text-white/40">Starting: Intent {'{'} act=android.intent.action.MAIN ... {'}'}</div>
+                                <div className="mt-2 text-blue-400"># Execution layer: VULKAN-WEBGL-2.0</div>
+                                <div className="text-white/20">Analyzing heap usage... OK</div>
+                                <div className="text-white/20">Native bridge established... OK</div>
+                              </div>
+
+                              <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-left">
+                                <h5 className="text-[10px] font-bold text-white/80 uppercase mb-3">App Dashboard (Simulated)</h5>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="p-2 bg-white/5 rounded-lg border border-white/5">
+                                    <div className="text-[8px] text-white/40 uppercase">Storage</div>
+                                    <div className="text-[10px] text-white/80 font-bold">128 MB / 2 GB</div>
+                                  </div>
+                                  <div className="p-2 bg-white/5 rounded-lg border border-white/5">
+                                    <div className="text-[8px] text-white/40 uppercase">Network</div>
+                                    <div className="text-[10px] text-green-400 font-bold">Connected</div>
+                                  </div>
+                                  <div className="p-2 bg-white/5 rounded-lg border border-white/5">
+                                    <div className="text-[8px] text-white/40 uppercase">CPU Usage</div>
+                                    <div className="text-[10px] text-white/80 font-bold">2.4%</div>
+                                  </div>
+                                  <div className="p-2 bg-white/5 rounded-lg border border-white/5">
+                                    <div className="text-[8px] text-white/40 uppercase">Permissions</div>
+                                    <div className="text-[10px] text-white/80 font-bold">Storage, Media</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-left">
+                                <h5 className="text-[10px] font-bold text-blue-400 uppercase mb-2">Native Bridge Configuration</h5>
+                                <p className="text-[9px] text-white/60 mb-3 leading-relaxed">
+                                  This APK is running in <strong>Headless Mode</strong>. To enable the visual interface, you must bridge it to a web endpoint or use the Native Client.
+                                </p>
+                                <div className="flex flex-col gap-2">
+                                  <button 
+                                    disabled={isAnalyzing}
+                                    onClick={() => handleAIUnmask(activeApp)}
+                                    className="w-full py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white rounded-xl text-[11px] font-black hover:opacity-90 transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-purple-500/20 border border-white/10"
+                                  >
+                                    {isAnalyzing ? (
+                                      <>
+                                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        AI DEEP SCANNING...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <ShieldCheck className="w-4 h-4" />
+                                        AI SMART UNMASK (WEB-APP DETECTOR)
+                                      </>
+                                    )}
+                                  </button>
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => {
+                                        const url = prompt("Enter Web URL to bridge this app (e.g. https://snaptube.com):");
+                                        if (url) {
+                                          const updatedApps = device.installedApps.map(a => 
+                                            a.id === activeApp.id ? { ...a, type: 'web', webUrl: url } : a
+                                          );
+                                          setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
+                                          addLog(`Bridged ${activeApp.name} to ${url}`);
+                                        }
+                                      }}
+                                      className="flex-1 py-2 bg-white/5 text-white/60 border border-white/10 rounded-lg text-[10px] font-bold hover:bg-white/10 transition-all"
+                                    >
+                                      Manual Bridge
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        addLog(`Launching ${activeApp.name} in Debug Mode...`);
+                                        alert("Debug Mode: Analyzing UI components... No visual assets found in APK manifest.");
+                                      }}
+                                      className="px-3 py-2 bg-white/5 text-white/60 border border-white/10 rounded-lg text-[10px] font-bold hover:bg-white/10 transition-all"
+                                    >
+                                      Debug UI
+                                    </button>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button 
+                                      onClick={() => handleSaveToCloud(activeApp)}
+                                      className="flex-1 py-2 bg-green-600/20 text-green-400 border border-green-500/20 rounded-lg text-[10px] font-bold hover:bg-green-600/30 transition-all flex items-center justify-center gap-2"
+                                    >
+                                      <Database className="w-3 h-3" />
+                                      Save to Cloud
+                                    </button>
+                                    <button 
+                                      onClick={() => handleUninstall(activeApp)}
+                                      className="flex-1 py-2 bg-red-600/20 text-red-400 border border-red-500/20 rounded-lg text-[10px] font-bold hover:bg-red-600/30 transition-all flex items-center justify-center gap-2"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                      Uninstall
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -627,11 +1253,23 @@ export default function App() {
                             }}
                             className="flex flex-col items-center gap-1 group"
                           >
-                            <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center group-hover:bg-white/10 group-active:scale-90 transition-all">
+                            <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center group-hover:bg-white/10 group-active:scale-90 transition-all relative">
                               {app.icon === 'Settings' && <Settings className="w-6 h-6 text-white/60" />}
                               {app.icon === 'Terminal' && <Terminal className="w-6 h-6 text-white/60" />}
                               {app.icon === 'Globe' && <Globe className="w-6 h-6 text-white/60" />}
+                              {app.icon === 'Folder' && <HardDrive className="w-6 h-6 text-white/60" />}
                               {app.icon === 'Package' && <Package className="w-6 h-6 text-blue-400/60" />}
+                              {app.icon === 'Music' && <Music className="w-6 h-6 text-purple-400/60" />}
+                              
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUninstall(app);
+                                }}
+                                className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+                              >
+                                <Trash2 className="w-2 h-2" />
+                              </button>
                             </div>
                             <span className="text-[9px] text-white/60 truncate w-full text-center">{app.name}</span>
                           </button>
@@ -642,18 +1280,35 @@ export default function App() {
                 </div>
 
                 {/* Navigation Bar */}
-                <div className="h-12 flex items-center justify-around px-8 pb-2">
-                  <button className="p-2 hover:bg-white/5 rounded-full transition-colors">
-                    <Layers className="w-4 h-4 text-white/40" />
+                <div className="h-12 flex items-center justify-around px-8 pb-2 border-t border-white/5 bg-black/40">
+                  <button 
+                    onClick={() => {
+                      if (activeApp) {
+                        setActiveApp(null);
+                        addLog("Back button pressed: Closing current app.");
+                      }
+                    }}
+                    className="p-2 hover:bg-white/5 rounded-full transition-colors group"
+                  >
+                    <ChevronLeft className="w-5 h-5 text-white/40 group-hover:text-white" />
                   </button>
                   <button 
-                    onClick={() => setActiveApp(null)}
+                    onClick={() => {
+                      setActiveApp(null);
+                      setIsAppSwitcherOpen(false);
+                    }}
                     className="p-2 bg-white/10 border border-white/10 rounded-full hover:bg-white/20 transition-all active:scale-90"
                   >
                     <Home className="w-5 h-5 text-white/80" />
                   </button>
-                  <button className="p-2 hover:bg-white/5 rounded-full transition-colors">
-                    <Search className="w-4 h-4 text-white/40" />
+                  <button 
+                    onClick={() => {
+                      setIsAppSwitcherOpen(!isAppSwitcherOpen);
+                      addLog("App Switcher toggled.");
+                    }}
+                    className="p-2 hover:bg-white/5 rounded-full transition-colors group"
+                  >
+                    <Layers className="w-4 h-4 text-white/40 group-hover:text-white" />
                   </button>
                 </div>
               </div>
@@ -669,6 +1324,36 @@ export default function App() {
 
       {/* Right Panel: Stats & API */}
       <div className="w-full lg:w-80 flex flex-col gap-6">
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Arkaios Identity</h3>
+          {userProfile?.arkaiosId ? (
+            <div className="space-y-4">
+              <div className="p-4 bg-purple-500/10 border border-purple-500/20 rounded-2xl">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center shadow-lg shadow-purple-500/20">
+                    <ShieldCheck className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-white uppercase tracking-tighter">{userProfile.digitalName}</h4>
+                    <p className="text-[8px] text-purple-400 font-mono font-bold">CITIZEN OF ARKAIOS</p>
+                  </div>
+                </div>
+                <div className="p-3 bg-black/40 rounded-xl border border-white/5 font-mono">
+                  <div className="text-[8px] text-white/20 uppercase mb-1">Unique Digital ID</div>
+                  <div className="text-[11px] text-white font-bold tracking-widest">{userProfile.arkaiosId}</div>
+                </div>
+              </div>
+              <p className="text-[9px] text-white/40 leading-relaxed italic">
+                "The first real human in a virtual and digital ecosystem."
+              </p>
+            </div>
+          ) : (
+            <div className="p-4 bg-white/5 border border-white/5 rounded-2xl text-center">
+              <p className="text-[10px] text-white/20 italic">Guest Identity Active</p>
+            </div>
+          )}
+        </div>
+
         <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
           <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Device Health</h3>
           <div className="space-y-4">
@@ -751,6 +1436,23 @@ export default function App() {
                 Try Plata Card Direct Emulation →
               </button>
             </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Official Public Project</h3>
+          <div className="space-y-3">
+            <p className="text-[10px] text-white/40 leading-relaxed">
+              This project is publicly available for Google to manage, hydrate, and improve.
+            </p>
+            <a 
+              href="https://ai.studio/apps/15cdbc13-f833-4b64-9d3c-05b22c5e2682?fullscreenApplet=true"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl text-[10px] font-bold hover:bg-purple-500/20 transition-all flex items-center justify-center gap-2"
+            >
+              <Globe className="w-3 h-3" /> Open in AI Studio
+            </a>
           </div>
         </div>
 

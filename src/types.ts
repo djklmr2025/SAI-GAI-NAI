@@ -21,6 +21,7 @@ export interface VirtualDevice {
   screenBrightness: number;
   volume: number;
   formFactor?: 'phone' | 'tablet';
+  orientation?: 'portrait' | 'landscape';
 }
 
 export interface UserProfile {
@@ -29,4 +30,7 @@ export interface UserProfile {
   email: string;
   photoURL: string;
   createdAt: number;
+  isDj?: boolean;
+  arkaiosId?: string;
+  digitalName?: string;
 }

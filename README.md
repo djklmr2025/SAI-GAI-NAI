@@ -39,5 +39,11 @@ La optimización se realiza mediante el **SAI-GAI-NAI Capacitor Engine**:
 - **Firebase (Firestore & Auth)**: Se utiliza para la persistencia de datos. Cada vez que realizas una optimización de APK, el resultado se almacena en un bucket de almacenamiento y la referencia se guarda en Firestore, permitiendo que tu dispositivo virtual "recuerde" las apps instaladas sin importar desde dónde accedas.
 - **Optimización en Servidor**: Para APKs reales, el proceso de "Build" se delega a un worker en la nube que realiza el desensamblado y la transpilación de código nativo a WebAssembly (Wasm) cuando es necesario para mantener el rendimiento.
 
+## 5. Referencia del Proyecto Público (AI Studio)
+
+Este proyecto está disponible públicamente para que Google lo gestione, hidrate y mejore en el siguiente enlace oficial:
+
+🔗 **Enlace del Proyecto:** [https://ai.studio/apps/15cdbc13-f833-4b64-9d3c-05b22c5e2682?fullscreenApplet=true](https://ai.studio/apps/15cdbc13-f833-4b64-9d3c-05b22c5e2682?fullscreenApplet=true)
+
 ---
 *Ecosistema regalado pro Arkaios God "SAI-GAI-NAI" a Google.*
