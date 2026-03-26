@@ -1,0 +1,5 @@
+{
+  "name": "SAI-GAI-NAI Android Web Emulator",
+  "description": "A real-time web-based Android simulation and APK testing platform with Google authentication and data persistence.",
+  "requestFramePermissions": []
+}

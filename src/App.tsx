@@ -1,0 +1,777 @@
+import { useState, useEffect } from 'react';
+import { auth, loginWithGoogle, logout, db } from './firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { motion, AnimatePresence } from 'motion/react';
+import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor } from 'lucide-react';
+import { VirtualDevice, VirtualApp } from './types';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+import { QRCodeCanvas } from 'qrcode.react';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [device, setDevice] = useState<VirtualDevice | null>(null);
+  const [activeApp, setActiveApp] = useState<VirtualApp | null>(null);
+  const [isBooting, setIsBooting] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [deepLinkUrl, setDeepLinkUrl] = useState<string>('');
+  const [isBuilding, setIsBuilding] = useState(false);
+  const [buildProgress, setBuildProgress] = useState(0);
+
+  const addLog = (msg: string) => {
+    setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 49)]);
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+      if (currentUser) {
+        addLog(`User ${currentUser.displayName} authenticated.`);
+        
+        // Check for URL parameters for direct app emulation
+        const params = new URLSearchParams(window.location.search);
+        const targetApp = params.get('app');
+        const targetPackage = params.get('package');
+
+        // Sync user profile
+        const userRef = doc(db, 'users', currentUser.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) {
+          await setDoc(userRef, {
+            uid: currentUser.uid,
+            displayName: currentUser.displayName,
+            email: currentUser.email,
+            photoURL: currentUser.photoURL,
+            createdAt: Date.now()
+          });
+        }
+
+        // Sync or create virtual device
+        const deviceRef = doc(db, 'devices', currentUser.uid);
+        const unsubscribeDevice = onSnapshot(deviceRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const deviceData = docSnap.data() as VirtualDevice;
+            setDevice(deviceData);
+
+            // Handle auto-install from URL if not already installed
+            if (targetApp && targetPackage) {
+              const isInstalled = deviceData.installedApps.some(a => a.packageName === targetPackage);
+              if (!isInstalled) {
+                addLog(`Analyzing remote APK: ${targetPackage}...`);
+                const newApp: VirtualApp = {
+                  id: Math.random().toString(36).substring(7),
+                  name: targetApp,
+                  packageName: targetPackage,
+                  icon: 'Package',
+                  version: '1.0.0-remote',
+                  status: 'installed',
+                  lastUsed: Date.now()
+                };
+                const updatedApps = [...deviceData.installedApps, newApp];
+                setDoc(deviceRef, { ...deviceData, installedApps: updatedApps });
+                addLog(`Auto-installed remote app: ${targetApp}`);
+              }
+            }
+          } else {
+            const initialDevice: VirtualDevice = {
+              id: currentUser.uid,
+              userId: currentUser.uid,
+              model: 'SAI-GAI-NAI X1',
+              osVersion: 'Android 14 (Simulated)',
+              battery: 85,
+              isLocked: true,
+              installedApps: [
+                { id: '1', name: 'Settings', packageName: 'com.android.settings', icon: 'Settings', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '2', name: 'Terminal', packageName: 'com.android.terminal', icon: 'Terminal', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now() }
+              ],
+              screenBrightness: 100,
+              volume: 70,
+              formFactor: 'phone'
+            };
+            setDoc(deviceRef, initialDevice);
+            addLog("New virtual device provisioned for user.");
+          }
+        });
+        return () => unsubscribeDevice();
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleBoot = () => {
+    setIsBooting(true);
+    addLog("Initializing SAI-GAI-NAI Kernel...");
+    setTimeout(() => {
+      addLog("Loading System UI...");
+      setTimeout(() => {
+        addLog("Android OS Booted successfully.");
+        setIsBooting(false);
+        if (device) {
+          setDoc(doc(db, 'devices', user!.uid), { ...device, isLocked: false });
+          
+          // Check for auto-launch after boot
+          const params = new URLSearchParams(window.location.search);
+          const targetPackage = params.get('package');
+          if (targetPackage) {
+            const appToLaunch = device.installedApps.find(a => a.packageName === targetPackage);
+            if (appToLaunch) {
+              setActiveApp(appToLaunch);
+              addLog(`Auto-launching ${appToLaunch.name}...`);
+            }
+          }
+        }
+      }, 2000);
+    }, 1500);
+  };
+
+  const installAPK = (name: string) => {
+    if (!device || !user) return;
+    const newApp: VirtualApp = {
+      id: Math.random().toString(36).substring(7),
+      name,
+      packageName: `com.user.${name.toLowerCase().replace(/\s+/g, '.')}`,
+      icon: 'Package',
+      version: '1.0.0-apk',
+      status: 'installed',
+      lastUsed: Date.now()
+    };
+    const updatedApps = [...device.installedApps, newApp];
+    setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
+    addLog(`APK "${name}" installed successfully.`);
+  };
+
+  const buildCapacitorApp = async (name: string, url: string) => {
+    if (!device || !user) return;
+    setIsBuilding(true);
+    setBuildProgress(0);
+    addLog(`Initializing Capacitor Build Engine for: ${name}`);
+    
+    const steps = [
+      "Creating project structure...",
+      "Adding Android platform...",
+      "Injecting Capacitor runtime...",
+      "Configuring WebView for: " + url,
+      "Generating APK manifest...",
+      "Compiling native bridges...",
+      "Signing APK package..."
+    ];
+
+    for (let i = 0; i < steps.length; i++) {
+      await new Promise(r => setTimeout(r, 600));
+      setBuildProgress(((i + 1) / steps.length) * 100);
+      addLog(steps[i]);
+    }
+
+    const newApp: VirtualApp = {
+      id: Math.random().toString(36).substring(7),
+      name,
+      packageName: `io.capacitor.${name.toLowerCase().replace(/\s+/g, '.')}`,
+      icon: 'Globe',
+      version: '1.0.0-cap',
+      status: 'installed',
+      lastUsed: Date.now(),
+      type: 'web',
+      webUrl: url
+    };
+
+    const updatedApps = [...device.installedApps, newApp];
+    await setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
+    
+    setIsBuilding(false);
+    addLog(`Capacitor APK "${name}" built and installed successfully.`);
+  };
+
+  const toggleFormFactor = () => {
+    if (!device || !user) return;
+    const newFactor = device.formFactor === 'tablet' ? 'phone' : 'tablet';
+    setDoc(doc(db, 'devices', user.uid), { ...device, formFactor: newFactor });
+    addLog(`Device form factor changed to: ${newFactor}`);
+  };
+
+  const downloadNativeBridge = (app: VirtualApp) => {
+    const deepLink = `${window.location.origin}${window.location.pathname}?app=${encodeURIComponent(app.name)}&package=${encodeURIComponent(app.packageName)}`;
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>SAI-GAI-NAI Bridge: ${app.name}</title>
+        <style>
+          body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+          .btn { background: #fff; color: #000; padding: 15px 30px; border-radius: 50px; text-decoration: none; font-weight: bold; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <h1>SAI-GAI-NAI Native Bridge</h1>
+        <p>Connecting to virtual environment for: <strong>${app.name}</strong></p>
+        <a href="${deepLink}" class="btn">Launch Emulator</a>
+        <script>
+          setTimeout(() => { window.location.href = "${deepLink}"; }, 1500);
+        </script>
+      </body>
+      </html>
+    `;
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `SAI_GAI_NAI_${app.name.replace(/\s+/g, '_')}_Bridge.html`;
+    a.click();
+    addLog(`Generated Native Bridge for ${app.name}`);
+  };
+
+  const generateDeepLink = () => {
+    const name = (document.getElementById('deep-app-name') as HTMLInputElement).value;
+    const pkg = (document.getElementById('deep-package') as HTMLInputElement).value;
+    if (name && pkg) {
+      const url = `${window.location.origin}${window.location.pathname}?app=${encodeURIComponent(name)}&package=${encodeURIComponent(pkg)}`;
+      setDeepLinkUrl(url);
+      navigator.clipboard.writeText(url);
+      addLog(`Generated deep link for ${name}`);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <motion.div 
+          animate={{ scale: [1, 1.2, 1], opacity: [0.5, 1, 0.5] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="text-white font-mono text-xl"
+        >
+          SAI-GAI-NAI BOOTING...
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4 overflow-hidden relative">
+        {/* Background Gradients */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/10 blur-[120px] rounded-full" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-500/10 blur-[120px] rounded-full" />
+        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="z-10 text-center max-w-2xl"
+        >
+          <div className="flex justify-center mb-8">
+            <div className="p-4 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl shadow-2xl">
+              <Cpu className="w-16 h-16 text-blue-400" />
+            </div>
+          </div>
+          <h1 className="text-6xl font-bold tracking-tighter mb-4 bg-gradient-to-b from-white to-white/40 bg-clip-text text-transparent">
+            SAI-GAI-NAI
+          </h1>
+          <p className="text-xl text-white/60 mb-12 font-light leading-relaxed">
+            The next-generation Android Web Emulator & APK Testing Environment. 
+            Real-time simulation, cloud persistence, and enterprise connectivity.
+          </p>
+          
+          <button 
+            onClick={loginWithGoogle}
+            className="group relative px-8 py-4 bg-white text-black rounded-full font-semibold text-lg flex items-center gap-3 hover:bg-white/90 transition-all active:scale-95 shadow-[0_0_40px_rgba(255,255,255,0.2)]"
+          >
+            <LogIn className="w-5 h-5" />
+            Sign in with Google
+            <div className="absolute inset-0 rounded-full border border-white/50 group-hover:scale-110 transition-transform duration-500 opacity-0 group-hover:opacity-100" />
+          </button>
+
+          <div className="mt-24 grid grid-cols-3 gap-8 text-left">
+            {[
+              { icon: ShieldCheck, title: "Secure", desc: "Google Auth & Firestore" },
+              { icon: Globe, title: "Web-Native", desc: "No installation required" },
+              { icon: Database, title: "Persistent", desc: "Save states & app data" }
+            ].map((feature, i) => (
+              <div key={i} className="p-6 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md">
+                <feature.icon className="w-6 h-6 text-blue-400 mb-3" />
+                <h3 className="font-semibold mb-1">{feature.title}</h3>
+                <p className="text-sm text-white/40">{feature.desc}</p>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        <footer className="absolute bottom-8 text-white/20 text-xs font-mono tracking-widest uppercase">
+          ecosistema regalado pro Arkaios God "SAI-GAI-NAI" a Google
+        </footer>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col lg:flex-row p-4 lg:p-8 gap-8 font-sans selection:bg-blue-500/30">
+      {/* Sidebar / Controls */}
+      <div className="w-full lg:w-80 flex flex-col gap-6">
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <div className="flex items-center gap-4 mb-6">
+            <img src={user.photoURL || ''} className="w-12 h-12 rounded-2xl border border-white/10" />
+            <div>
+              <h2 className="font-bold text-lg leading-tight">{user.displayName}</h2>
+              <p className="text-xs text-white/40 font-mono uppercase tracking-tighter">Developer ID: {user.uid.slice(0, 8)}</p>
+            </div>
+          </div>
+          <button 
+            onClick={logout}
+            className="w-full py-3 bg-white/5 hover:bg-red-500/10 hover:text-red-400 border border-white/10 rounded-xl transition-all flex items-center justify-center gap-2 text-sm font-medium"
+          >
+            <LogOut className="w-4 h-4" />
+            Terminate Session
+          </button>
+        </div>
+
+        <div className="flex-1 p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-mono uppercase tracking-widest text-white/40">System Logs</h3>
+            <Terminal className="w-4 h-4 text-white/20" />
+          </div>
+          <div className="flex-1 overflow-y-auto font-mono text-[10px] space-y-1 text-blue-400/80 scrollbar-hide">
+            {logs.map((log, i) => (
+              <div key={i} className="opacity-80 hover:opacity-100 transition-opacity">{log}</div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex-1 p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-mono uppercase tracking-widest text-white/40">Cloud Storage / My Apps</h3>
+            <HardDrive className="w-4 h-4 text-white/20" />
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-2 scrollbar-hide">
+            {device?.installedApps.filter(a => a.packageName.includes('io.capacitor') || a.version.includes('apk')).map(app => (
+              <div key={app.id} className="p-3 bg-white/5 border border-white/5 rounded-xl flex items-center justify-between group hover:bg-white/10 transition-all">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-8 h-8 bg-white/5 rounded-lg flex items-center justify-center shrink-0">
+                    {app.type === 'web' ? <Globe className="w-4 h-4 text-purple-400" /> : <Package className="w-4 h-4 text-blue-400" />}
+                  </div>
+                  <div className="overflow-hidden">
+                    <p className="text-[10px] font-bold truncate">{app.name}</p>
+                    <p className="text-[8px] text-white/40 truncate">{app.packageName}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => setActiveApp(app)}
+                    className="p-1.5 hover:bg-green-500/20 text-green-400 rounded-lg"
+                    title="Launch"
+                  >
+                    <Play className="w-3 h-3" />
+                  </button>
+                  <button 
+                    onClick={() => downloadNativeBridge(app)}
+                    className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg"
+                    title="Download Native Bridge"
+                  >
+                    <DownloadCloud className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+            {(!device?.installedApps.some(a => a.packageName.includes('io.capacitor') || a.version.includes('apk'))) && (
+              <p className="text-[10px] text-white/20 text-center py-8 italic">No apps in your cloud space yet.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">APK Sideload</h3>
+          <div 
+            onClick={() => {
+              const name = prompt("Enter App Name to Simulate APK Install:");
+              if (name) installAPK(name);
+            }}
+            className="border-2 border-dashed border-white/10 rounded-2xl p-8 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-500/50 hover:bg-blue-500/5 transition-all group"
+          >
+            <UploadCloud className="w-8 h-8 text-white/20 group-hover:text-blue-400 transition-colors" />
+            <p className="text-xs text-white/40 text-center">Click to simulate APK upload</p>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Native Client & Interconnection</h3>
+          <div className="space-y-3">
+            <p className="text-[10px] text-white/40 leading-relaxed">
+              To run the system in <strong>Native Mode</strong> on Windows, use the Electron wrapper. 
+              This enables local filesystem access and deep-link rehydration.
+            </p>
+            <button 
+              onClick={() => {
+                const readmeContent = `Consulte el archivo README.md en la raíz del proyecto para ver los pasos detallados sobre cómo crear el instalable de Windows (.exe) usando Electron y cómo configurar la interconexión con Firebase.`;
+                alert(readmeContent);
+              }}
+              className="w-full py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl text-[10px] font-bold hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2"
+            >
+              <MonitorSmartphone className="w-3 h-3" /> View Setup Guide
+            </button>
+            <div className="p-3 bg-black/40 rounded-xl border border-white/5">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[8px] text-white/20 uppercase font-mono">Sync Status</span>
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+              </div>
+              <p className="text-[9px] text-green-400/60 font-mono">Connected to Google Cloud</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Capacitor Build Engine</h3>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <input 
+                id="cap-app-name"
+                type="text" 
+                placeholder="App Name" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-blue-500/50 outline-none"
+              />
+              <input 
+                id="cap-url"
+                type="text" 
+                placeholder="https://example.com" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-blue-500/50 outline-none"
+              />
+              <button 
+                disabled={isBuilding}
+                onClick={() => {
+                  const name = (document.getElementById('cap-app-name') as HTMLInputElement).value;
+                  const url = (document.getElementById('cap-url') as HTMLInputElement).value;
+                  if (name && url) buildCapacitorApp(name, url);
+                }}
+                className="w-full py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl text-[10px] font-bold hover:bg-purple-500/20 transition-all disabled:opacity-50"
+              >
+                {isBuilding ? 'Building APK...' : 'Build Web-to-APK'}
+              </button>
+            </div>
+            {isBuilding && (
+              <div className="space-y-1">
+                <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${buildProgress}%` }}
+                    className="h-full bg-purple-500"
+                  />
+                </div>
+                <p className="text-[8px] text-purple-400/60 font-mono text-center">Compiling Native Assets...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Main Emulator View */}
+      <div className="flex-1 flex flex-col items-center justify-center relative">
+        <div className="absolute inset-0 bg-blue-500/5 blur-[100px] rounded-full pointer-events-none" />
+        
+        {/* Device Toggle */}
+        <div className="mb-4 flex gap-2 p-1 bg-white/5 border border-white/10 rounded-full backdrop-blur-xl z-20">
+          <button 
+            onClick={toggleFormFactor}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-2",
+              device?.formFactor !== 'tablet' ? "bg-white text-black" : "text-white/40 hover:text-white"
+            )}
+          >
+            <Smartphone className="w-3 h-3" /> Phone
+          </button>
+          <button 
+            onClick={toggleFormFactor}
+            className={cn(
+              "px-4 py-1.5 rounded-full text-[10px] font-bold transition-all flex items-center gap-2",
+              device?.formFactor === 'tablet' ? "bg-white text-black" : "text-white/40 hover:text-white"
+            )}
+          >
+            <Monitor className="w-3 h-3" /> Tablet
+          </button>
+        </div>
+
+        {/* Phone/Tablet Frame */}
+        <motion.div 
+          animate={{ 
+            width: device?.formFactor === 'tablet' ? 800 : 320,
+            height: device?.formFactor === 'tablet' ? 550 : 650
+          }}
+          className="relative bg-[#1a1a1a] rounded-[3rem] border-[8px] border-[#2a2a2a] shadow-[0_0_100px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col transition-all duration-500"
+        >
+          {/* Notch */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-[#2a2a2a] rounded-b-2xl z-50 flex items-center justify-center gap-2">
+            <div className="w-2 h-2 bg-black rounded-full" />
+            <div className="w-8 h-1 bg-black/50 rounded-full" />
+          </div>
+
+          {/* Screen Content */}
+          <div className="flex-1 bg-black relative overflow-hidden">
+            {device?.isLocked ? (
+              <div className="h-full flex flex-col items-center justify-center p-8 text-center">
+                {isBooting ? (
+                  <div className="flex flex-col items-center gap-4">
+                    <motion.div 
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                      className="w-12 h-12 border-2 border-blue-500 border-t-transparent rounded-full"
+                    />
+                    <p className="text-xs font-mono text-blue-400">Booting System...</p>
+                  </div>
+                ) : (
+                  <>
+                    <Smartphone className="w-16 h-16 text-white/10 mb-6" />
+                    <h4 className="text-xl font-bold mb-2">{device.model}</h4>
+                    <p className="text-sm text-white/40 mb-8">Powered by SAI-GAI-NAI</p>
+                    <button 
+                      onClick={handleBoot}
+                      className="px-6 py-2 bg-white text-black rounded-full font-bold text-sm hover:bg-white/90 active:scale-95 transition-all"
+                    >
+                      Power On
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col">
+                {/* Status Bar */}
+                <div className="h-10 flex items-center justify-between px-6 pt-2">
+                  <span className="text-[10px] font-bold">{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-3 h-3 text-white/60" />
+                    <Activity className="w-3 h-3 text-white/60" />
+                    <div className="flex items-center gap-1">
+                      <div className="w-4 h-2 border border-white/40 rounded-[1px] relative">
+                        <div className="absolute inset-0 bg-white/80" style={{ width: `${device.battery}%` }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Main OS View */}
+                <div className="flex-1 p-4 relative">
+                  <AnimatePresence mode="wait">
+                    {activeApp ? (
+                      <motion.div 
+                        key={activeApp.id}
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="absolute inset-0 bg-[#121212] z-40 flex flex-col"
+                      >
+                        <div className="h-12 flex items-center justify-between px-4 border-b border-white/5">
+                          <div className="flex items-center gap-2">
+                            <Package className="w-4 h-4 text-blue-400" />
+                            <span className="text-xs font-bold">{activeApp.name}</span>
+                          </div>
+                          <button onClick={() => setActiveApp(null)} className="p-1 hover:bg-white/5 rounded-lg">
+                            <Square className="w-4 h-4 text-white/40" />
+                          </button>
+                        </div>
+                        
+                        {activeApp.type === 'web' ? (
+                          <div className="flex-1 bg-white flex flex-col">
+                            <div className="h-8 bg-gray-100 flex items-center px-3 border-b border-gray-200 gap-2">
+                              <div className="w-2 h-2 bg-red-400 rounded-full" />
+                              <div className="w-2 h-2 bg-yellow-400 rounded-full" />
+                              <div className="w-2 h-2 bg-green-400 rounded-full" />
+                              <div className="flex-1 bg-white rounded px-2 py-0.5 text-[8px] text-gray-500 truncate border border-gray-300">
+                                {activeApp.webUrl}
+                              </div>
+                              <RefreshCcw className="w-3 h-3 text-gray-400" />
+                            </div>
+                            <div className="flex-1 w-full bg-white relative overflow-hidden">
+                              <iframe 
+                                src={activeApp.webUrl} 
+                                className="w-full h-full border-none"
+                                title={activeApp.name}
+                                referrerPolicy="no-referrer"
+                              />
+                              {/* Overlay to prevent interaction issues in simulation if needed */}
+                              <div className="absolute inset-0 pointer-events-none border-4 border-black/5" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 p-4 flex flex-col items-center justify-center text-center gap-4">
+                            <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10">
+                              <Package className="w-10 h-10 text-white/20" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold">{activeApp.packageName}</p>
+                              <p className="text-[10px] text-white/40 font-mono mt-1">Version: {activeApp.version}</p>
+                            </div>
+                            <div className="w-full mt-8 p-4 bg-black/40 rounded-xl border border-white/5 text-left font-mono text-[9px] text-green-400/80">
+                              <div>$ adb shell am start -n {activeApp.packageName}</div>
+                              <div className="text-white/40">Starting: Intent {'{'} act=android.intent.action.MAIN ... {'}'}</div>
+                              <div className="text-white/40">Status: OK</div>
+                              <div className="mt-2 text-blue-400"># SAI-GAI-NAI Runtime Analysis</div>
+                              <div className="text-white/20">Analyzing heap usage...</div>
+                              <div className="text-white/20">Checking native libraries...</div>
+                              <div className="text-white/20">Emulation layer: VULKAN-WEBGL-2.0</div>
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    ) : (
+                      <div className="grid grid-cols-4 gap-4">
+                        {device.installedApps.map((app) => (
+                          <button 
+                            key={app.id}
+                            onClick={() => {
+                              setActiveApp(app);
+                              addLog(`Launched ${app.name} (${app.packageName})`);
+                            }}
+                            className="flex flex-col items-center gap-1 group"
+                          >
+                            <div className="w-12 h-12 bg-white/5 border border-white/10 rounded-2xl flex items-center justify-center group-hover:bg-white/10 group-active:scale-90 transition-all">
+                              {app.icon === 'Settings' && <Settings className="w-6 h-6 text-white/60" />}
+                              {app.icon === 'Terminal' && <Terminal className="w-6 h-6 text-white/60" />}
+                              {app.icon === 'Globe' && <Globe className="w-6 h-6 text-white/60" />}
+                              {app.icon === 'Package' && <Package className="w-6 h-6 text-blue-400/60" />}
+                            </div>
+                            <span className="text-[9px] text-white/60 truncate w-full text-center">{app.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Navigation Bar */}
+                <div className="h-12 flex items-center justify-around px-8 pb-2">
+                  <button className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                    <Layers className="w-4 h-4 text-white/40" />
+                  </button>
+                  <button 
+                    onClick={() => setActiveApp(null)}
+                    className="p-2 bg-white/10 border border-white/10 rounded-full hover:bg-white/20 transition-all active:scale-90"
+                  >
+                    <Home className="w-5 h-5 text-white/80" />
+                  </button>
+                  <button className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                    <Search className="w-4 h-4 text-white/40" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+
+        {/* Floating Attribution */}
+        <div className="absolute bottom-[-40px] text-white/10 text-[10px] font-mono tracking-widest uppercase text-center w-full">
+          ecosistema regalado pro Arkaios God "SAI-GAI-NAI" a Google
+        </div>
+      </div>
+
+      {/* Right Panel: Stats & API */}
+      <div className="w-full lg:w-80 flex flex-col gap-6">
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Device Health</h3>
+          <div className="space-y-4">
+            <div>
+              <div className="flex justify-between text-[10px] mb-1">
+                <span className="text-white/40">CPU Load</span>
+                <span className="text-blue-400">12%</span>
+              </div>
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                <motion.div 
+                  animate={{ width: '12%' }}
+                  className="h-full bg-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="flex justify-between text-[10px] mb-1">
+                <span className="text-white/40">RAM Usage</span>
+                <span className="text-purple-400">1.2GB / 8GB</span>
+              </div>
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                <motion.div 
+                  animate={{ width: '15%' }}
+                  className="h-full bg-purple-500"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Deep Link Generator</h3>
+          <div className="space-y-4">
+            <p className="text-[10px] text-white/40">Generate a direct emulation link for any app. Use this to bypass QR-only landing pages.</p>
+            <div className="space-y-2">
+              <input 
+                id="deep-app-name"
+                type="text" 
+                placeholder="App Name (e.g. Plata Card)" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-blue-500/50 outline-none"
+              />
+              <input 
+                id="deep-package"
+                type="text" 
+                placeholder="Package (e.g. mx.platacard)" 
+                className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-blue-500/50 outline-none"
+              />
+              <button 
+                onClick={generateDeepLink}
+                className="w-full py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl text-[10px] font-bold hover:bg-blue-500/20 transition-all"
+              >
+                Generate & Copy Link
+              </button>
+            </div>
+
+            {deepLinkUrl && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex flex-col items-center gap-4 p-4 bg-white rounded-2xl"
+              >
+                <QRCodeCanvas value={deepLinkUrl} size={120} />
+                <div className="w-full">
+                  <p className="text-[7px] text-black/40 font-mono uppercase mb-1">Live Production URL:</p>
+                  <p className="text-[8px] text-black font-mono text-center break-all bg-black/5 p-2 rounded-lg">{deepLinkUrl}</p>
+                </div>
+                <div className="text-[10px] text-black font-bold uppercase tracking-wider">Scan to Emulate Now</div>
+              </motion.div>
+            )}
+
+            <div className="pt-4 border-t border-white/5">
+              <p className="text-[9px] text-white/20 mb-2 uppercase font-mono">Example:</p>
+              <button 
+                onClick={() => {
+                  const url = `${window.location.origin}${window.location.pathname}?app=PlataCard&package=mx.platacard`;
+                  window.open(url, '_blank');
+                }}
+                className="text-[10px] text-blue-400/60 hover:text-blue-400 underline decoration-blue-400/20"
+              >
+                Try Plata Card Direct Emulation →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-xl">
+          <h3 className="text-xs font-mono uppercase tracking-widest text-white/40 mb-4">Connectivity API</h3>
+          <div className="p-4 bg-black/40 rounded-2xl border border-white/5 font-mono text-[10px] text-white/60 leading-relaxed">
+            <div className="text-blue-400 mb-2">// External Platform Hook</div>
+            <div>GET /api/v1/connectivity/status</div>
+            <div className="mt-2 text-green-400/80">
+              {'{'}<br/>
+              &nbsp;&nbsp;"status": "active",<br/>
+              &nbsp;&nbsp;"platform": "SAI-GAI-NAI",<br/>
+              &nbsp;&nbsp;"version": "1.0.0-alpha"<br/>
+              {'}'}
+            </div>
+          </div>
+          <p className="mt-4 text-[10px] text-white/30 leading-tight">
+            Use this endpoint to bridge external platforms (e.g. Netflix) to the virtual device ecosystem.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
