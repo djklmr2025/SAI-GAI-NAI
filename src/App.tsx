@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { auth, loginWithGoogle, logout, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'motion/react';
-import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle, Code2 } from 'lucide-react';
 import { VirtualDevice, VirtualApp, UserProfile } from './types';
 import { analyzeAppMetadata } from './services/aiService';
 import { validateSecuritySticker } from './services/djService';
+import { parseApk } from './services/apkParser';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -23,6 +24,8 @@ export default function App() {
   const [device, setDevice] = useState<VirtualDevice | null>(null);
   const [activeApp, setActiveApp] = useState<VirtualApp | null>(null);
   const [isBooting, setIsBooting] = useState(false);
+  const [bootLog, setBootLog] = useState<string[]>([]);
+  const [runtimeEngine, setRuntimeEngine] = useState<'HLE' | 'ARC' | 'VULKAN'>('HLE');
   const [logs, setLogs] = useState<string[]>([]);
   const [deepLinkUrl, setDeepLinkUrl] = useState<string>('');
   const [isBuilding, setIsBuilding] = useState(false);
@@ -32,6 +35,30 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false);
   const [stickerUrl, setStickerUrl] = useState('');
   const [validationResult, setValidationResult] = useState<{ success: boolean; message: string; metadata?: any } | null>(null);
+
+  const bootApp = async (app: VirtualApp) => {
+    setIsBooting(true);
+    setBootLog([]);
+    const logs = [
+      "Initializing SAI-GAI-NAI Kernel...",
+      "Loading ARC Runtime (Legacy Bridge)...",
+      "Mounting OBB/Data partitions...",
+      "Verifying APK signature...",
+      "Starting Zygote process...",
+      "Launching Activity: " + app.packageName
+    ];
+
+    for (const log of logs) {
+      setBootLog(prev => [...prev, `[INIT] ${log}`]);
+      await new Promise(r => setTimeout(r, 400));
+    }
+
+    setTimeout(() => {
+      setIsBooting(false);
+      setActiveApp(app);
+      addLog(`Launched ${app.name} via ${runtimeEngine} Engine.`);
+    }, 500);
+  };
 
   const addLog = (msg: string) => {
     setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.slice(0, 49)]);
@@ -192,6 +219,12 @@ export default function App() {
               needsUpdate = true;
             }
 
+            const hasSysInfo = updatedApps.some(a => a.packageName === 'com.arkaios.sysinfo');
+            if (!hasSysInfo) {
+              updatedApps.push({ id: '6', name: 'System Info', packageName: 'com.arkaios.sysinfo', icon: 'Cpu', version: '1.0', status: 'stopped', lastUsed: Date.now() });
+              needsUpdate = true;
+            }
+
             const browserApp = updatedApps.find(a => a.packageName === 'com.android.browser');
             if (!browserApp) {
               updatedApps.push({ id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' });
@@ -226,7 +259,8 @@ export default function App() {
                 { id: '2', name: 'Terminal', packageName: 'com.android.terminal', icon: 'Terminal', version: '1.0', status: 'stopped', lastUsed: Date.now() },
                 { id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' },
                 { id: '4', name: 'Files', packageName: 'com.android.documentsui', icon: 'Folder', version: '1.0', status: 'stopped', lastUsed: Date.now() },
-                { id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() }
+                { id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '6', name: 'System Info', packageName: 'com.arkaios.sysinfo', icon: 'Cpu', version: '1.0', status: 'stopped', lastUsed: Date.now() }
               ],
               screenBrightness: 100,
               volume: 70,
@@ -307,20 +341,20 @@ export default function App() {
     }, 1500);
   };
 
-  const installAPK = (name: string) => {
+  const installAPK = (name: string, packageName?: string, version?: string) => {
     if (!device || !user) return;
     const newApp: VirtualApp = {
       id: Math.random().toString(36).substring(7),
       name,
-      packageName: `com.user.${name.toLowerCase().replace(/\s+/g, '.')}`,
+      packageName: packageName || `com.user.${name.toLowerCase().replace(/\s+/g, '.')}`,
       icon: 'Package',
-      version: '1.0.0-apk',
+      version: version || '1.0.0-apk',
       status: 'installed',
       lastUsed: Date.now()
     };
     const updatedApps = [...device.installedApps, newApp];
     setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
-    addLog(`APK "${name}" installed successfully.`);
+    addLog(`APK "${name}" (${newApp.packageName}) installed successfully.`);
     
     // Automatically launch the app after installation
     setActiveApp(newApp);
@@ -364,8 +398,87 @@ export default function App() {
     const updatedApps = [...device.installedApps, newApp];
     await setDoc(doc(db, 'devices', user.uid), { ...device, installedApps: updatedApps });
     
+    // Trigger automatic download of the Virtual APK (for emulator)
+    const virtualBlob = new Blob([
+      `SAI-GAI-NAI Virtual APK Package\n`,
+      `------------------------------\n`,
+      `App Name: ${name}\n`,
+      `Package: ${newApp.packageName}\n`,
+      `Target URL: ${url}\n`,
+      `Build ID: ${newApp.id}\n`,
+      `Build Date: ${new Date().toLocaleString()}\n`,
+      `Status: SIGNED_EMULATOR\n`,
+      `------------------------------\n`,
+      `This is a Virtual APK designed for the SAI-GAI-NAI Web Emulator.\n`,
+      `To generate a REAL binary APK for Android devices, use the "Export Native Source" option.`
+    ], { type: 'application/vnd.android.package-archive' });
+    
+    const vUrl = window.URL.createObjectURL(virtualBlob);
+    const vLink = document.createElement('a');
+    vLink.href = vUrl;
+    vLink.download = `${name.replace(/\s+/g, '_')}_virtual.apk`;
+    document.body.appendChild(vLink);
+    vLink.click();
+    document.body.removeChild(vLink);
+    window.URL.revokeObjectURL(vUrl);
+
     setIsBuilding(false);
-    addLog(`Capacitor APK "${name}" built and installed successfully.`);
+    addLog(`Virtual APK "${name}" deployed to emulator and downloaded.`);
+  };
+
+  const downloadNativeSource = (name: string, url: string) => {
+    const capacitorConfig = {
+      appId: `io.capacitor.${name.toLowerCase().replace(/\s+/g, '.')}`,
+      appName: name,
+      webDir: 'www',
+      server: {
+        url: url,
+        allowNavigation: [new URL(url).hostname]
+      }
+    };
+
+    const packageJson = {
+      name: name.toLowerCase().replace(/\s+/g, '-'),
+      version: '1.0.0',
+      dependencies: {
+        "@capacitor/android": "^5.0.0",
+        "@capacitor/core": "^5.0.0"
+      },
+      devDependencies: {
+        "@capacitor/cli": "^5.0.0"
+      }
+    };
+
+    const readme = `# Native Android Build Guide for ${name}
+1. Install Node.js and Android Studio.
+2. Run \`npm install\`.
+3. Run \`npx cap add android\`.
+4. Run \`npx cap open android\`.
+5. In Android Studio, click "Build" > "Build Bundle(s) / APK(s)" > "Build APK(s)".
+
+Your real .apk will be generated in \`android/app/build/outputs/apk/debug/app-debug.apk\`.`;
+
+    const sourceContent = `
+--- CAPACITOR.CONFIG.JSON ---
+${JSON.stringify(capacitorConfig, null, 2)}
+
+--- PACKAGE.JSON ---
+${JSON.stringify(packageJson, null, 2)}
+
+--- README.MD ---
+${readme}
+    `;
+
+    const blob = new Blob([sourceContent], { type: 'text/plain' });
+    const dUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = dUrl;
+    link.download = `${name.replace(/\s+/g, '_')}_Native_Source.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(dUrl);
+    addLog(`Exported Native Source for ${name}. Use this to build a real .apk.`);
   };
 
   const toggleFormFactor = () => {
@@ -589,6 +702,33 @@ export default function App() {
                     <Play className="w-3 h-3" />
                   </button>
                   <button 
+                    onClick={() => {
+                      const blob = new Blob([
+                        `SAI-GAI-NAI Virtual APK Package\n`,
+                        `------------------------------\n`,
+                        `App Name: ${app.name}\n`,
+                        `Package: ${app.packageName}\n`,
+                        `Version: ${app.version}\n`,
+                        `Build Date: ${new Date(app.lastUsed).toLocaleString()}\n`,
+                        `------------------------------\n`,
+                        `This is a simulated APK package for the SAI-GAI-NAI ecosystem.`
+                      ], { type: 'application/vnd.android.package-archive' });
+                      const url = window.URL.createObjectURL(blob);
+                      const link = document.createElement('a');
+                      link.href = url;
+                      link.download = `${app.name.replace(/\s+/g, '_')}.apk`;
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                      window.URL.revokeObjectURL(url);
+                      addLog(`Downloading APK: ${app.name}`);
+                    }}
+                    className="p-1.5 hover:bg-purple-500/20 text-purple-400 rounded-lg"
+                    title="Download APK"
+                  >
+                    <Download className="w-3 h-3" />
+                  </button>
+                  <button 
                     onClick={() => downloadNativeBridge(app)}
                     className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg"
                     title="Download Native Bridge"
@@ -666,17 +806,34 @@ export default function App() {
                 placeholder="https://example.com" 
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] focus:border-blue-500/50 outline-none"
               />
-              <button 
-                disabled={isBuilding}
-                onClick={() => {
-                  const name = (document.getElementById('cap-app-name') as HTMLInputElement).value;
-                  const url = (document.getElementById('cap-url') as HTMLInputElement).value;
-                  if (name && url) buildCapacitorApp(name, url);
-                }}
-                className="w-full py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl text-[10px] font-bold hover:bg-purple-500/20 transition-all disabled:opacity-50"
-              >
-                {isBuilding ? 'Building APK...' : 'Build Web-to-APK'}
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  disabled={isBuilding}
+                  onClick={() => {
+                    const name = (document.getElementById('cap-app-name') as HTMLInputElement).value;
+                    const url = (document.getElementById('cap-url') as HTMLInputElement).value;
+                    if (name && url) buildCapacitorApp(name, url);
+                  }}
+                  className="py-2 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-xl text-[10px] font-bold hover:bg-purple-500/20 transition-all disabled:opacity-50 flex items-center justify-center gap-1"
+                >
+                  <Monitor className="w-3 h-3" />
+                  {isBuilding ? 'Building...' : 'Build Virtual APK'}
+                </button>
+                <button 
+                  onClick={() => {
+                    const name = (document.getElementById('cap-app-name') as HTMLInputElement).value;
+                    const url = (document.getElementById('cap-url') as HTMLInputElement).value;
+                    if (name && url) downloadNativeSource(name, url);
+                  }}
+                  className="py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-xl text-[10px] font-bold hover:bg-blue-500/20 transition-all flex items-center justify-center gap-1"
+                >
+                  <Code2 className="w-3 h-3" />
+                  Export Native Source
+                </button>
+              </div>
+              <p className="text-[8px] text-white/20 text-center italic mt-1">
+                Virtual APKs run in the emulator. Native Source is for real Android Studio builds.
+              </p>
             </div>
             {isBuilding && (
               <div className="space-y-1">
@@ -804,7 +961,27 @@ export default function App() {
                 {/* Main OS View */}
                 <div className="flex-1 p-4 relative">
                   <AnimatePresence mode="wait">
-                    {isAppSwitcherOpen ? (
+                    {isBooting ? (
+                      <motion.div 
+                        key="boot"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-[60] bg-black flex flex-col items-center justify-center p-8 font-mono"
+                      >
+                        <div className="w-16 h-16 mb-8 relative">
+                          <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full" />
+                          <div className="absolute inset-0 border-4 border-t-blue-500 rounded-full animate-spin" />
+                        </div>
+                        <div className="w-full max-w-[200px] space-y-1">
+                          {bootLog.map((log, i) => (
+                            <div key={i} className="text-[8px] text-blue-400/80 animate-in fade-in slide-in-from-bottom-1">
+                              {log}
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    ) : isAppSwitcherOpen ? (
                       <motion.div 
                         key="app-switcher"
                         initial={{ opacity: 0, y: 20 }}
@@ -827,7 +1004,7 @@ export default function App() {
                               key={app.id}
                               className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-center justify-between group hover:bg-white/10 transition-all cursor-pointer"
                               onClick={() => {
-                                setActiveApp(app);
+                                bootApp(app);
                                 setIsAppSwitcherOpen(false);
                               }}
                             >
@@ -890,12 +1067,23 @@ export default function App() {
                                     type="file" 
                                     accept=".apk" 
                                     className="hidden" 
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                       const file = e.target.files?.[0];
                                       if (file) {
-                                        const name = file.name.replace('.apk', '');
-                                        installAPK(name);
-                                        addLog(`APK "${file.name}" uploaded and installed via Files app.`);
+                                        addLog(`Deep scanning APK: ${file.name}...`);
+                                        try {
+                                          const metadata = await parseApk(file);
+                                          installAPK(metadata.name, metadata.packageName, metadata.version);
+                                          addLog(`Analysis complete. Package: ${metadata.packageName}`);
+                                          if (metadata.permissions.length > 0) {
+                                            addLog(`Found ${metadata.permissions.length} permissions in manifest.`);
+                                          }
+                                        } catch (err) {
+                                          console.error(err);
+                                          const name = file.name.replace('.apk', '');
+                                          installAPK(name);
+                                          addLog(`Basic installation for "${file.name}" (Deep scan failed).`);
+                                        }
                                       }
                                     }}
                                   />
@@ -941,6 +1129,116 @@ export default function App() {
                               <p className="text-[10px] text-blue-400/60 italic">
                                 Use the "Upload APK" button to sideload native packages into the SAI-GAI-NAI environment.
                               </p>
+                            </div>
+                          </div>
+                        ) : activeApp.packageName === 'com.android.settings' ? (
+                          <div className="flex-1 flex flex-col p-6 text-left overflow-y-auto custom-scrollbar">
+                            <h3 className="text-xl font-black text-white mb-6">System Settings</h3>
+                            
+                            <div className="space-y-6">
+                              <div className="space-y-2">
+                                <label className="text-[10px] text-white/40 uppercase font-bold">Runtime Engine (ARC Legacy Support)</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {['HLE', 'ARC', 'VULKAN'].map((engine) => (
+                                    <button
+                                      key={engine}
+                                      onClick={() => setRuntimeEngine(engine as any)}
+                                      className={cn(
+                                        "py-2 rounded-xl text-[10px] font-bold border transition-all",
+                                        runtimeEngine === engine 
+                                          ? "bg-blue-500 border-blue-400 text-white shadow-lg shadow-blue-500/20" 
+                                          : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10"
+                                      )}
+                                    >
+                                      {engine}
+                                    </button>
+                                  ))}
+                                </div>
+                                <p className="text-[8px] text-white/20 italic">
+                                  ARC mode attempts to use the legacy Chrome Native Client bridge.
+                                </p>
+                              </div>
+
+                              <div className="p-4 bg-white/5 border border-white/10 rounded-2xl">
+                                <div className="flex items-center justify-between mb-4">
+                                  <span className="text-xs font-bold text-white">Developer Options</span>
+                                  <div className="w-8 h-4 bg-blue-500 rounded-full relative">
+                                    <div className="absolute right-1 top-1 w-2 h-2 bg-white rounded-full" />
+                                  </div>
+                                </div>
+                                <div className="space-y-3">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[10px] text-white/60">USB Debugging</span>
+                                    <span className="text-[10px] text-blue-400">Enabled</span>
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-[10px] text-white/60">Force GPU Rendering</span>
+                                    <span className="text-[10px] text-white/20">Disabled</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : activeApp.packageName === 'com.arkaios.sysinfo' ? (
+                          <div className="flex-1 flex flex-col p-6 text-left overflow-y-auto custom-scrollbar font-mono">
+                            <div className="flex items-center gap-3 mb-6">
+                              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
+                                <Cpu className="w-6 h-6 text-blue-400" />
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-bold text-white">System Architecture</h3>
+                                <p className="text-[10px] text-white/40 uppercase tracking-widest">SAI-GAI-NAI Kernel v1.0</p>
+                              </div>
+                            </div>
+
+                            <div className="space-y-6">
+                              <div className="p-4 bg-white/5 border border-white/10 rounded-2xl">
+                                <h4 className="text-xs font-bold text-blue-400 mb-2 uppercase">Emulation Level: HLE</h4>
+                                <p className="text-[10px] text-white/60 leading-relaxed">
+                                  This system operates as a <strong>High-Level Emulator (HLE)</strong>. 
+                                  It simulates Android APIs and behaviors using WebGL, Vulkan-JS, and React layers.
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                                  <div className="text-[8px] text-white/20 uppercase mb-1">Execution Mode</div>
+                                  <div className="text-[10px] text-green-400 font-bold">VIRTUALIZED</div>
+                                </div>
+                                <div className="p-3 bg-black/40 border border-white/5 rounded-xl">
+                                  <div className="text-[8px] text-white/20 uppercase mb-1">Binary Support</div>
+                                  <div className="text-[10px] text-yellow-400 font-bold">SIMULATED</div>
+                                </div>
+                              </div>
+
+                              <div className="space-y-2">
+                                <h4 className="text-xs font-bold text-white/80 uppercase">How it works:</h4>
+                                <ul className="space-y-2">
+                                  {[
+                                    { t: "Virtual APKs", d: "Shortcuts that bridge web content into the SAI-GAI-NAI runtime." },
+                                    { t: "Native Sideload", d: "Analyzes APK manifests to simulate app dashboards and headless logic." },
+                                    { t: "Native Source", d: "Real Capacitor/Android code for building binary .apk files in Android Studio." }
+                                  ].map((item, i) => (
+                                    <li key={i} className="flex gap-3 items-start">
+                                      <div className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1 shrink-0" />
+                                      <div>
+                                        <div className="text-[10px] font-bold text-white">{item.t}</div>
+                                        <div className="text-[9px] text-white/40">{item.d}</div>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+
+                              <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-2xl">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <AlertCircle className="w-3 h-3 text-red-400" />
+                                  <span className="text-[9px] text-red-400 font-bold uppercase">Important Note</span>
+                                </div>
+                                <p className="text-[9px] text-white/40 leading-relaxed italic">
+                                  "This is a digital ecosystem for development and testing. It does not run a real Linux kernel or ART virtual machine. For real device testing, use the Exported Native Source."
+                                </p>
+                              </div>
                             </div>
                           </div>
                         ) : activeApp.packageName === 'com.arkaios.djportal' ? (
@@ -1062,47 +1360,32 @@ export default function App() {
                             </div>
                           </div>
                         ) : activeApp.type === 'web' ? (
-                          <div className="flex-1 bg-white flex flex-col">
-                            <div className="h-8 bg-gray-100 flex items-center px-3 border-b border-gray-200 gap-2">
-                              <div className="w-2 h-2 bg-red-400 rounded-full" />
-                              <div className="w-2 h-2 bg-yellow-400 rounded-full" />
-                              <div className="w-2 h-2 bg-green-400 rounded-full" />
-                              <div className="flex-1 bg-white rounded px-2 py-0.5 text-[8px] text-gray-500 truncate border border-gray-300">
-                                {activeApp.webUrl}
+                          <div className="flex-1 bg-white flex flex-col relative">
+                            {/* App Header for Capacitor Apps (Minimal) */}
+                            {activeApp.packageName.includes('io.capacitor') && (
+                              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 to-blue-500 z-50" />
+                            )}
+                            
+                            {/* Browser UI only for the real Browser app */}
+                            {activeApp.packageName === 'com.android.chrome' && (
+                              <div className="h-8 bg-gray-100 flex items-center px-3 border-b border-gray-200 gap-2">
+                                <div className="w-2 h-2 bg-red-400 rounded-full" />
+                                <div className="w-2 h-2 bg-yellow-400 rounded-full" />
+                                <div className="w-2 h-2 bg-green-400 rounded-full" />
+                                <div className="flex-1 bg-white rounded px-2 py-0.5 text-[8px] text-gray-500 truncate border border-gray-300">
+                                  {activeApp.webUrl}
+                                </div>
+                                <button 
+                                  onClick={() => handleSaveToCloud(activeApp)}
+                                  className="p-1 hover:bg-green-500/10 text-green-500 rounded transition-colors"
+                                  title="Save to Cloud"
+                                >
+                                  <Database className="w-3 h-3" />
+                                </button>
+                                <RefreshCcw className="w-3 h-3 text-gray-400" />
                               </div>
-                              <button 
-                                onClick={() => handleSaveToCloud(activeApp)}
-                                className="p-1 hover:bg-green-500/10 text-green-500 rounded transition-colors"
-                                title="Save to Cloud"
-                              >
-                                <Database className="w-3 h-3" />
-                              </button>
-                              <button 
-                                onClick={() => {
-                                  if (!device || !user) return;
-                                  const updatedApps = device.installedApps.map(a => 
-                                    a.id === activeApp.id ? { ...a, type: 'native', webUrl: undefined } : a
-                                  );
-                                  const updatedDevice = { ...device, installedApps: updatedApps };
-                                  setDoc(doc(db, 'devices', user.uid), updatedDevice);
-                                  setDevice(updatedDevice);
-                                  setActiveApp({ ...activeApp, type: 'native', webUrl: undefined });
-                                  addLog(`Reset ${activeApp.name} to Native Mode.`);
-                                }}
-                                className="p-1 hover:bg-red-500/10 text-red-500 rounded transition-colors"
-                                title="Reset to Native"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                              </button>
-                              <button 
-                                onClick={() => handleUninstall(activeApp)}
-                                className="p-1 hover:bg-red-500/10 text-red-500 rounded transition-colors"
-                                title="Uninstall App"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                              <RefreshCcw className="w-3 h-3 text-gray-400" />
-                            </div>
+                            )}
+
                             <div className="flex-1 w-full bg-white relative overflow-hidden">
                               <iframe 
                                 src={activeApp.webUrl} 
@@ -1113,6 +1396,29 @@ export default function App() {
                               {/* Overlay to prevent interaction issues in simulation if needed */}
                               <div className="absolute inset-0 pointer-events-none border-4 border-black/5" />
                             </div>
+
+                            {/* Floating Controls for Capacitor Apps */}
+                            {activeApp.packageName.includes('io.capacitor') && (
+                              <div className="absolute bottom-4 right-4 flex gap-2">
+                                <button 
+                                  onClick={() => {
+                                    if (!device || !user) return;
+                                    const updatedApps = device.installedApps.map(a => 
+                                      a.id === activeApp.id ? { ...a, type: 'native', webUrl: undefined } : a
+                                    );
+                                    const updatedDevice = { ...device, installedApps: updatedApps };
+                                    setDoc(doc(db, 'devices', user.uid), updatedDevice);
+                                    setDevice(updatedDevice);
+                                    setActiveApp({ ...activeApp, type: 'native', webUrl: undefined });
+                                    addLog(`Reset ${activeApp.name} to Native Mode.`);
+                                  }}
+                                  className="p-2 bg-black/60 backdrop-blur-md border border-white/10 rounded-full text-white/60 hover:text-white transition-all shadow-xl"
+                                  title="Exit Web View"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="flex-1 p-4 flex flex-col items-center justify-start text-center gap-4 overflow-y-auto">
@@ -1222,6 +1528,34 @@ export default function App() {
                                   </div>
                                   <div className="flex gap-2">
                                     <button 
+                                      onClick={() => {
+                                        const blob = new Blob([
+                                          `SAI-GAI-NAI Virtual APK Package\n`,
+                                          `------------------------------\n`,
+                                          `App Name: ${activeApp.name}\n`,
+                                          `Package: ${activeApp.packageName}\n`,
+                                          `Version: ${activeApp.version}\n`,
+                                          `------------------------------\n`,
+                                          `This is a simulated APK package for the SAI-GAI-NAI ecosystem.`
+                                        ], { type: 'application/vnd.android.package-archive' });
+                                        const url = window.URL.createObjectURL(blob);
+                                        const link = document.createElement('a');
+                                        link.href = url;
+                                        link.download = `${activeApp.name.replace(/\s+/g, '_')}.apk`;
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        window.URL.revokeObjectURL(url);
+                                        addLog(`Downloading APK: ${activeApp.name}`);
+                                      }}
+                                      className="w-full py-2 bg-purple-600/20 text-purple-400 border border-purple-500/20 rounded-lg text-[10px] font-bold hover:bg-purple-600/30 transition-all flex items-center justify-center gap-2"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      Download APK
+                                    </button>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button 
                                       onClick={() => handleSaveToCloud(activeApp)}
                                       className="flex-1 py-2 bg-green-600/20 text-green-400 border border-green-500/20 rounded-lg text-[10px] font-bold hover:bg-green-600/30 transition-all flex items-center justify-center gap-2"
                                     >
@@ -1248,8 +1582,7 @@ export default function App() {
                           <button 
                             key={app.id}
                             onClick={() => {
-                              setActiveApp(app);
-                              addLog(`Launched ${app.name} (${app.packageName})`);
+                              bootApp(app);
                             }}
                             className="flex flex-col items-center gap-1 group"
                           >
