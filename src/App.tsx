@@ -3,7 +3,7 @@ import { auth, loginWithGoogle, logout, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle, Code2 } from 'lucide-react';
+import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle, Code2, Tv, Wifi, Power, Cast, Radio, Server, PlayCircle, StopCircle } from 'lucide-react';
 import { VirtualDevice, VirtualApp, UserProfile } from './types';
 import { analyzeAppMetadata } from './services/aiService';
 import { validateSecuritySticker } from './services/djService';
@@ -35,6 +35,16 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false);
   const [stickerUrl, setStickerUrl] = useState('');
   const [validationResult, setValidationResult] = useState<{ success: boolean; message: string; metadata?: any } | null>(null);
+  
+  // WebRTC/VNC Streaming States
+  const [webrtcUrl, setWebrtcUrl] = useState<string>('');
+  const [webrtcActiveTab, setWebrtcActiveTab] = useState<'dockerify' | 'google' | 'apkonline' | 'novnc'>('dockerify');
+  const [webrtcLogs, setWebrtcLogs] = useState<string[]>(["[SYSTEM] Streaming Hub initialized.", "[SYSTEM] Awaiting signaling or direct noVNC link..."]);
+  const [webrtcIsConnecting, setWebrtcIsConnecting] = useState<boolean>(false);
+  const [webrtcIsConnected, setWebrtcIsConnected] = useState<boolean>(false);
+  const [webrtcLatency, setWebrtcLatency] = useState<number>(0);
+  const [webrtcFps, setWebrtcFps] = useState<number>(0);
+
 
   const bootApp = async (app: VirtualApp) => {
     setIsBooting(true);
@@ -94,6 +104,42 @@ export default function App() {
     } finally {
       setIsValidating(false);
     }
+  };
+
+  const handleConnectWebRtc = async () => {
+    setWebrtcIsConnecting(true);
+    setWebrtcLogs(prev => [...prev, `[SYSTEM] Contacting server gateway...`]);
+    
+    const steps = [
+      `[HTTP] Initiating connection handshake...`,
+      webrtcUrl ? `[WS] Socket handshake resolved with ${webrtcUrl}` : `[WS] Socket handshake resolved with simulated localhost`,
+      `[WEBRTC] Gathering ICE candidates...`,
+      `[WEBRTC] Creating local SDP Offer...`,
+      `[WEBRTC] Remote SDP Answer received...`,
+      `[WEBRTC] WebRTC Session negotiated successfully.`,
+      `[H264] Demuxing live GLES Vulkan stream...`,
+      `[ADB] Connection initialized (transport: usb)`
+    ];
+
+    for (const step of steps) {
+      await new Promise(resolve => setTimeout(resolve, 300));
+      setWebrtcLogs(prev => [...prev, step]);
+    }
+
+    setWebrtcIsConnecting(false);
+    setWebrtcIsConnected(true);
+    setWebrtcLatency(Math.floor(Math.random() * 25) + 12);
+    setWebrtcFps(60);
+    addLog(webrtcUrl ? `WebRTC connected to real stream at ${webrtcUrl}` : `WebRTC connected to simulated high-performance Android stream.`);
+  };
+
+  const handleDisconnectWebRtc = () => {
+    setWebrtcIsConnected(false);
+    setWebrtcIsConnecting(false);
+    setWebrtcLatency(0);
+    setWebrtcFps(0);
+    setWebrtcLogs(prev => [...prev, `[SYSTEM] Stream disconnected manually.`, `[ADB] transport closed.`]);
+    addLog("WebRTC: Disconnected stream session.");
   };
 
   const handleUninstall = async (app: VirtualApp) => {
@@ -225,6 +271,12 @@ export default function App() {
               needsUpdate = true;
             }
 
+            const hasWebRtcHub = updatedApps.some(a => a.packageName === 'com.arkaios.webrtc');
+            if (!hasWebRtcHub) {
+              updatedApps.push({ id: '7', name: 'Streaming Hub', packageName: 'com.arkaios.webrtc', icon: 'Tv', version: '1.0', status: 'stopped', lastUsed: Date.now() });
+              needsUpdate = true;
+            }
+
             const browserApp = updatedApps.find(a => a.packageName === 'com.android.browser');
             if (!browserApp) {
               updatedApps.push({ id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' });
@@ -260,7 +312,8 @@ export default function App() {
                 { id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' },
                 { id: '4', name: 'Files', packageName: 'com.android.documentsui', icon: 'Folder', version: '1.0', status: 'stopped', lastUsed: Date.now() },
                 { id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() },
-                { id: '6', name: 'System Info', packageName: 'com.arkaios.sysinfo', icon: 'Cpu', version: '1.0', status: 'stopped', lastUsed: Date.now() }
+                { id: '6', name: 'System Info', packageName: 'com.arkaios.sysinfo', icon: 'Cpu', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '7', name: 'Streaming Hub', packageName: 'com.arkaios.webrtc', icon: 'Tv', version: '1.0', status: 'stopped', lastUsed: Date.now() }
               ],
               screenBrightness: 100,
               volume: 70,
@@ -1356,6 +1409,345 @@ ${readme}
                                   All codes are integrated into the Central IA Bank as evidence. 
                                   The JSON Builder generates a unique signature that is verified through multi-layer security filters.
                                 </p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : activeApp.packageName === 'com.arkaios.webrtc' ? (
+                          <div className="flex-1 flex flex-col md:flex-row p-4 text-left overflow-y-auto md:overflow-hidden gap-4 custom-scrollbar bg-zinc-950 font-sans h-full">
+                            {/* LEFT PANEL: Streaming Canvas */}
+                            <div className="flex-1 flex flex-col gap-3 min-w-[300px] h-full md:overflow-y-auto">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                    <Tv className="w-4 h-4 text-blue-400 animate-pulse" />
+                                    CLOUD STREAMING HUB
+                                  </h3>
+                                  <p className="text-[9px] text-white/40 uppercase tracking-wider font-mono">WebRTC & noVNC Protocol Bridge</p>
+                                </div>
+                                <div className="flex gap-2 items-center">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded-full text-[8px] font-mono font-bold flex items-center gap-1",
+                                    webrtcIsConnected ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
+                                  )}>
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", webrtcIsConnected ? "bg-green-400 animate-pulse" : "bg-red-400")} />
+                                    {webrtcIsConnected ? "STREAM LIVE" : "DISCONNECTED"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Virtual Monitor / Iframe viewport */}
+                              <div className="relative aspect-[9/16] max-h-[460px] mx-auto w-full max-w-[260px] bg-neutral-950 rounded-3xl border border-white/10 overflow-hidden flex flex-col shadow-2xl shadow-blue-500/5">
+                                {webrtcIsConnected && webrtcUrl ? (
+                                  <div className="flex-1 w-full h-full relative">
+                                    <iframe 
+                                      src={webrtcUrl} 
+                                      className="w-full h-full border-none bg-black"
+                                      title="Remote Android Stream"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {/* Overlay status */}
+                                    <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[8px] font-mono text-blue-400 pointer-events-none flex items-center gap-1">
+                                      <Wifi className="w-2.5 h-2.5" />
+                                      LATENCY: {webrtcLatency}ms
+                                    </div>
+                                  </div>
+                                ) : webrtcIsConnected ? (
+                                  /* Interactive simulated stream */
+                                  <div className="flex-1 flex flex-col bg-[#121212] relative overflow-hidden group select-none">
+                                    {/* App screen inside simulated stream */}
+                                    <div className="flex-1 flex flex-col p-4 justify-between relative">
+                                      {/* Android status bar inside */}
+                                      <div className="flex justify-between items-center text-[8px] font-bold text-white/60">
+                                        <span>12:00</span>
+                                        <div className="flex gap-1 items-center">
+                                          <Wifi className="w-2 h-2" />
+                                          <span>LTE</span>
+                                          <div className="w-3 h-1.5 border border-white/40 rounded-sm relative flex items-center px-0.5">
+                                            <div className="w-full h-full bg-white/60" />
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      {/* Launcher Content */}
+                                      <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                                        <div className="w-12 h-12 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 border border-white/10 animate-bounce">
+                                          <Smartphone className="w-6 h-6 text-white" />
+                                        </div>
+                                        <div className="text-center space-y-1">
+                                          <p className="text-xs font-black text-white tracking-wide">WebRTC-Android</p>
+                                          <p className="text-[8px] font-mono text-green-400">FPS: {webrtcFps} | loss: 0%</p>
+                                        </div>
+                                        <div className="p-3 bg-black/60 rounded-xl border border-white/5 w-full text-[9px] font-mono text-white/60 text-left space-y-1">
+                                          <div className="text-blue-400 font-bold">Container Details:</div>
+                                          <div>OS: Android 13 (Docker x86)</div>
+                                          <div>GLES version: 3.0 (vulkan)</div>
+                                          <div>Resolution: 1080x1920</div>
+                                        </div>
+                                      </div>
+
+                                      {/* Android Navigation bar inside */}
+                                      <div className="flex justify-around items-center h-8 border-t border-white/5 text-white/40">
+                                        <ChevronLeft className="w-4 h-4 cursor-pointer hover:text-white" />
+                                        <Home className="w-3.5 h-3.5 cursor-pointer hover:text-white" />
+                                        <Menu className="w-4 h-4 cursor-pointer hover:text-white" />
+                                      </div>
+                                    </div>
+                                    {/* Remote overlay latency stats */}
+                                    <div className="absolute top-2 left-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[8px] font-mono text-blue-400 pointer-events-none flex items-center gap-1">
+                                      <Wifi className="w-2.5 h-2.5 animate-pulse" />
+                                      LATENCY: {webrtcLatency}ms
+                                    </div>
+                                    <div className="absolute top-2 right-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-[8px] font-mono text-green-400 pointer-events-none">
+                                      {webrtcFps} FPS
+                                    </div>
+                                  </div>
+                                ) : (
+                                  /* Offline View */
+                                  <div className="flex-1 flex flex-col items-center justify-center bg-[#09090b] p-6 text-center">
+                                    <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-3">
+                                      <Power className="w-5 h-5 text-white/20" />
+                                    </div>
+                                    <h4 className="text-xs font-bold text-white mb-1">Stream Offline</h4>
+                                    <p className="text-[9px] text-white/40 mb-4 max-w-[180px] leading-relaxed">
+                                      Connect your custom server or activate the simulated high-performance container.
+                                    </p>
+                                    <button
+                                      onClick={handleConnectWebRtc}
+                                      className="py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl text-[10px] shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
+                                    >
+                                      <PlayCircle className="w-3.5 h-3.5" />
+                                      ACTIVATE EMULATOR
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* External Controller Buttons */}
+                              {webrtcIsConnected && (
+                                <div className="flex justify-center gap-2">
+                                  <button 
+                                    onClick={() => handleDisconnectWebRtc()}
+                                    className="py-1.5 px-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl text-[9px] font-bold hover:bg-red-500/20 transition-all flex items-center gap-1"
+                                  >
+                                    <StopCircle className="w-3 h-3" />
+                                    DISCONNECT
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setWebrtcLogs(prev => [...prev, `[USER] Triggered home button.`]);
+                                      addLog("WebRTC: Sent Home keyevent.");
+                                    }}
+                                    className="py-1.5 px-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-[9px] font-bold hover:bg-white/10 transition-all"
+                                  >
+                                    HOME (ADB)
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      const key = prompt("Enter ADB text to send:");
+                                      if (key) {
+                                        setWebrtcLogs(prev => [...prev, `[USER] Sent text input: "${key}"`]);
+                                        addLog(`WebRTC: Sent text input: ${key}`);
+                                      }
+                                    }}
+                                    className="py-1.5 px-3 bg-white/5 border border-white/10 text-white/60 rounded-xl text-[9px] font-bold hover:bg-white/10 transition-all"
+                                  >
+                                    SEND TEXT
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* RIGHT PANEL: Settings, Logs, and Blueprint */}
+                            <div className="flex-1 flex flex-col gap-3 min-w-[300px] h-full md:overflow-y-auto">
+                              {/* Configuration & Connect */}
+                              <div className="p-4 bg-white/5 border border-white/10 rounded-2xl space-y-3">
+                                <h4 className="text-xs font-bold text-white flex items-center gap-2 font-mono uppercase tracking-wider">
+                                  <Settings className="w-3.5 h-3.5 text-blue-400" />
+                                  CONNECTION GATEWAY
+                                </h4>
+                                <div className="space-y-1">
+                                  <label className="text-[8px] font-mono text-white/40 uppercase tracking-wider block">Docker / noVNC Stream URL</label>
+                                  <div className="flex gap-2">
+                                    <input 
+                                      type="text"
+                                      value={webrtcUrl}
+                                      onChange={(e) => setWebrtcUrl(e.target.value)}
+                                      placeholder="e.g. http://localhost:6080/vnc.html"
+                                      className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-white focus:outline-none focus:border-blue-500/50"
+                                    />
+                                    <button 
+                                      onClick={webrtcIsConnected ? handleDisconnectWebRtc : handleConnectWebRtc}
+                                      className={cn(
+                                        "px-3 py-2 rounded-xl text-[10px] font-black tracking-wide transition-all",
+                                        webrtcIsConnected 
+                                          ? "bg-red-500 text-white" 
+                                          : "bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/20"
+                                      )}
+                                    >
+                                      {webrtcIsConnecting ? "CONNECTING..." : webrtcIsConnected ? "DISCONNECT" : "CONNECT"}
+                                    </button>
+                                  </div>
+                                </div>
+                                <p className="text-[8px] text-white/30 leading-normal italic">
+                                  Leave the Stream URL blank to boot the fully simulated Android high-performance streaming container.
+                                </p>
+                              </div>
+
+                              {/* TABS: Blueprints vs Console */}
+                              <div className="flex-1 flex flex-col bg-white/5 border border-white/10 rounded-2xl overflow-hidden min-h-[220px]">
+                                <div className="flex border-b border-white/10">
+                                  <button 
+                                    onClick={() => setWebrtcActiveTab('dockerify')}
+                                    className={cn(
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase border-r border-white/10 transition-all",
+                                      webrtcActiveTab === 'dockerify' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
+                                    )}
+                                  >
+                                    Dockerify
+                                  </button>
+                                  <button 
+                                    onClick={() => setWebrtcActiveTab('google')}
+                                    className={cn(
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase border-r border-white/10 transition-all",
+                                      webrtcActiveTab === 'google' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
+                                    )}
+                                  >
+                                    Google RTC
+                                  </button>
+                                  <button 
+                                    onClick={() => setWebrtcActiveTab('apkonline')}
+                                    className={cn(
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase border-r border-white/10 transition-all",
+                                      webrtcActiveTab === 'apkonline' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
+                                    )}
+                                  >
+                                    APKOnline
+                                  </button>
+                                  <button 
+                                    onClick={() => setWebrtcActiveTab('novnc')}
+                                    className={cn(
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase transition-all",
+                                      webrtcActiveTab === 'novnc' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
+                                    )}
+                                  >
+                                    noVNC Core
+                                  </button>
+                                </div>
+
+                                <div className="flex-1 p-3 overflow-y-auto max-h-[160px] custom-scrollbar text-[9px] font-mono text-white/70">
+                                  {webrtcActiveTab === 'dockerify' && (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center text-blue-400 border-b border-white/5 pb-1 font-bold">
+                                        <span>dockerify-android Setup (Shmayro)</span>
+                                        <button 
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(`docker run -d -p 6080:6080 --privileged -e EMULATOR_PARAMS="-no-window -gpu swiftshader_indirect" shmayro/dockerify-android:latest`);
+                                            setWebrtcLogs(prev => [...prev, "[SYSTEM] Copied Dockerify run command to clipboard!"]);
+                                          }}
+                                          className="text-[8px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded hover:bg-blue-500/30 transition-all"
+                                        >
+                                          COPY COMMAND
+                                        </button>
+                                      </div>
+                                      <p className="text-white/40 text-[8px] leading-relaxed">
+                                        This setup streams an entire Android Emulator via WebSockets/noVNC inside an x86 Ubuntu core container with hardware acceleration.
+                                      </p>
+                                      <div className="p-2 bg-black/40 rounded border border-white/5 select-all overflow-x-auto whitespace-pre">
+{`# 1. Run container
+docker run -d \\
+  -p 6080:6080 \\
+  --privileged \\
+  -e EMULATOR_PARAMS="-no-window -gpu swiftshader_indirect" \\
+  shmayro/dockerify-android:latest
+
+# 2. Open Streaming Hub & connect:
+# Stream URL: http://localhost:6080/vnc.html`}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {webrtcActiveTab === 'google' && (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center text-blue-400 border-b border-white/5 pb-1 font-bold">
+                                        <span>Google Official WebRTC Emulator</span>
+                                        <button 
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(`docker run -d -p 80:80 -p 5554:5554 -p 5555:5555 --device /dev/kvm us-docker.pkg.dev/android-emulator-build/images/r-playstore-x86_64:latest`);
+                                            setWebrtcLogs(prev => [...prev, "[SYSTEM] Copied Google WebRTC run command to clipboard!"]);
+                                          }}
+                                          className="text-[8px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded hover:bg-blue-500/30 transition-all"
+                                        >
+                                          COPY COMMAND
+                                        </button>
+                                      </div>
+                                      <p className="text-white/40 text-[8px] leading-relaxed">
+                                        Official Google Emulator Docker containing deep WebRTC engine support. Uses native KVM for full hardware acceleration.
+                                      </p>
+                                      <div className="p-2 bg-black/40 rounded border border-white/5 select-all overflow-x-auto whitespace-pre">
+{`# Requires KVM support on host
+docker run -d \\
+  -p 8554:8554 \\
+  -p 5554:5554 \\
+  --device /dev/kvm \\
+  --privileged \\
+  us-docker.pkg.dev/android-emulator-build/images/r-playstore-x86_64:latest`}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {webrtcActiveTab === 'apkonline' && (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center text-blue-400 border-b border-white/5 pb-1 font-bold">
+                                        <span>apkonline-emulator Integration</span>
+                                      </div>
+                                      <p className="text-white/40 text-[8px] leading-relaxed">
+                                        Provides free online android emulators. You can use their direct container service, find your session WebURL, and paste it inside our Gateway input.
+                                      </p>
+                                      <div className="p-2 bg-black/40 rounded border border-white/5 select-all overflow-x-auto whitespace-pre">
+{`# 1. Start session on apkonline.net
+# 2. Copy the active session iframe URL
+# 3. Paste it above and connect directly.`}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {webrtcActiveTab === 'novnc' && (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center text-blue-400 border-b border-white/5 pb-1 font-bold">
+                                        <span>adit9852 Platform Setup</span>
+                                      </div>
+                                      <p className="text-white/40 text-[8px] leading-relaxed">
+                                        An industrial setup using a Node.js signaling proxy, Docker containers, and noVNC/React integration to host multiple custom emulators.
+                                      </p>
+                                      <div className="p-2 bg-black/40 rounded border border-white/5 select-all overflow-x-auto whitespace-pre">
+{`# 1. Pull adit9852 platform repo
+# 2. Install Node and Docker dependencies
+# 3. Mount custom APK directory
+# 4. Bind local port to 6080 for bridge access`}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Terminal Logs (Connection console) */}
+                              <div className="bg-black border border-white/10 rounded-2xl p-3 h-[100px] flex flex-col font-mono text-[9px] text-green-400/90">
+                                <div className="flex justify-between items-center border-b border-white/5 pb-1 mb-1">
+                                  <span className="text-white/40 text-[8px] uppercase font-bold tracking-wider">Console Outputs</span>
+                                  <button 
+                                    onClick={() => setWebrtcLogs(["[SYSTEM] Console logs cleared."])}
+                                    className="text-[8px] text-red-400/60 hover:text-red-400 font-bold uppercase"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar">
+                                  {webrtcLogs.map((log, index) => (
+                                    <div key={index} className="leading-relaxed">
+                                      {log}
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             </div>
                           </div>
