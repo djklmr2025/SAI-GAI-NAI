@@ -38,7 +38,7 @@ export default function App() {
   
   // WebRTC/VNC Streaming States
   const [webrtcUrl, setWebrtcUrl] = useState<string>('');
-  const [webrtcActiveTab, setWebrtcActiveTab] = useState<'dockerify' | 'google' | 'apkonline' | 'novnc'>('dockerify');
+  const [webrtcActiveTab, setWebrtcActiveTab] = useState<'dockerify' | 'google' | 'apkonline' | 'novnc' | 'tunnel'>('dockerify');
   const [webrtcLogs, setWebrtcLogs] = useState<string[]>(["[SYSTEM] Streaming Hub initialized.", "[SYSTEM] Awaiting signaling or direct noVNC link..."]);
   const [webrtcIsConnecting, setWebrtcIsConnecting] = useState<boolean>(false);
   const [webrtcIsConnected, setWebrtcIsConnected] = useState<boolean>(false);
@@ -1626,11 +1626,20 @@ ${readme}
                                   <button 
                                     onClick={() => setWebrtcActiveTab('novnc')}
                                     className={cn(
-                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase transition-all",
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase border-r border-white/10 transition-all",
                                       webrtcActiveTab === 'novnc' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
                                     )}
                                   >
                                     noVNC Core
+                                  </button>
+                                  <button 
+                                    onClick={() => setWebrtcActiveTab('tunnel')}
+                                    className={cn(
+                                      "flex-1 py-2 text-[9px] font-bold tracking-wider uppercase transition-all",
+                                      webrtcActiveTab === 'tunnel' ? "bg-white/5 text-blue-400" : "text-white/40 hover:text-white"
+                                    )}
+                                  >
+                                    Túnel Local
                                   </button>
                                 </div>
 
@@ -1724,6 +1733,44 @@ docker run -d \\
 # 2. Install Node and Docker dependencies
 # 3. Mount custom APK directory
 # 4. Bind local port to 6080 for bridge access`}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {webrtcActiveTab === 'tunnel' && (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between items-center text-blue-400 border-b border-white/5 pb-1 font-bold">
+                                        <span>Túnel Seguro (HTTPS) - Conexión Real</span>
+                                        <button 
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(`ngrok http 6080`);
+                                            setWebrtcLogs(prev => [...prev, "[SYSTEM] Copied ngrok tunnel command to clipboard!"]);
+                                          }}
+                                          className="text-[8px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded hover:bg-blue-500/30 transition-all"
+                                        >
+                                          COPY NGROK
+                                        </button>
+                                      </div>
+                                      <p className="text-white/40 text-[8px] leading-relaxed">
+                                        Este panel en la web corre sobre <strong className="text-white/80">HTTPS</strong>. Los navegadores bloquean iframes que no sean HTTPS por seguridad (Mixed Content). Sigue estos pasos para conectar tu contenedor local real:
+                                      </p>
+                                      <div className="space-y-2 text-[8px] leading-normal text-white/60">
+                                        <div><strong className="text-blue-400">Paso 1:</strong> Inicia el contenedor Docker (`shmayro/dockerify-android`) expuesto en el puerto <code className="bg-white/5 px-1 rounded text-white">6080</code> en tu PC.</div>
+                                        <div><strong className="text-blue-400">Paso 2:</strong> En tu PC local, instala y corre un túnel público seguro sobre ese puerto:</div>
+                                      </div>
+                                      <div className="p-2 bg-black/40 rounded border border-white/5 select-all overflow-x-auto whitespace-pre">
+{`# Opción A (ngrok):
+ngrok http 6080
+
+# Opción B (Cloudflare Tunnel):
+cloudflared tunnel --url http://localhost:6080
+
+# Opción C (LocalTunnel):
+npx localtunnel --port 6080`}
+                                      </div>
+                                      <div className="space-y-1 text-[8px] text-white/50 leading-relaxed bg-blue-500/5 p-2 rounded border border-blue-500/10">
+                                        <p><strong className="text-blue-400">Paso 3:</strong> Copia la dirección pública <strong className="text-green-400">https://...</strong> que te devuelva el túnel.</p>
+                                        <p><strong className="text-blue-400">Paso 4:</strong> Pégala arriba en el campo "Docker / noVNC Stream URL" y haz clic en <strong className="text-blue-400">CONNECT</strong>.</p>
                                       </div>
                                     </div>
                                   )}
