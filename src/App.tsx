@@ -3,11 +3,12 @@ import { auth, loginWithGoogle, logout, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle, Code2, Tv, Wifi, Power, Cast, Radio, Server, PlayCircle, StopCircle } from 'lucide-react';
+import { Smartphone, LogIn, LogOut, ShieldCheck, Cpu, Database, Globe, Terminal, Activity, Package, Layers, Settings, Home, Search, PlusCircle, Trash2, Play, Square, RefreshCcw, Download, UploadCloud, Smartphone as PhoneIcon, HardDrive, MonitorSmartphone, DownloadCloud, Monitor, Maximize, RotateCcw, RotateCw, ChevronLeft, Menu, Music, CheckCircle, AlertCircle, Code2, Tv, Wifi, Power, Cast, Radio, Server, PlayCircle, StopCircle, Wrench, FileCode, FolderTree, Hammer, Binary, Fingerprint, Share2, Heart } from 'lucide-react';
 import { VirtualDevice, VirtualApp, UserProfile } from './types';
 import { analyzeAppMetadata } from './services/aiService';
 import { validateSecuritySticker } from './services/djService';
 import { parseApk } from './services/apkParser';
+import { APK_PROJECTS } from './services/apktoolFiles';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -44,6 +45,108 @@ export default function App() {
   const [webrtcIsConnected, setWebrtcIsConnected] = useState<boolean>(false);
   const [webrtcLatency, setWebrtcLatency] = useState<number>(0);
   const [webrtcFps, setWebrtcFps] = useState<number>(0);
+
+  // Apktool Studio States
+  const [apktoolSelectedApk, setApktoolSelectedApk] = useState<string>('com.arkaios.djportal.apk');
+  const [apktoolActiveTab, setApktoolActiveTab] = useState<'decompile' | 'rebuild' | 'about'>('decompile');
+  const [apktoolIsDecompiled, setApktoolIsDecompiled] = useState<boolean>(false);
+  const [apktoolIsDecompiling, setApktoolIsDecompiling] = useState<boolean>(false);
+  const [apktoolSelectedFile, setApktoolSelectedFile] = useState<string>('AndroidManifest.xml');
+  const [apktoolLogs, setApktoolLogs] = useState<string[]>(["[APKTOOL] Studio ready.", "[INFO] Select an APK package and click Decompile."]);
+  const [apktoolEditedContents, setApktoolEditedContents] = useState<Record<string, string>>({});
+  const [apktoolIsRebuilding, setApktoolIsRebuilding] = useState<boolean>(false);
+  const [apktoolIsRebuilt, setApktoolIsRebuilt] = useState<boolean>(false);
+  const [apktoolIsSigned, setApktoolIsSigned] = useState<boolean>(false);
+
+  const handleApktoolDecompile = async () => {
+    setApktoolIsDecompiling(true);
+    setApktoolIsDecompiled(false);
+    setApktoolIsRebuilt(false);
+    setApktoolIsSigned(false);
+    setApktoolLogs(prev => [...prev, `[APKTOOL] apktool d ${apktoolSelectedApk} -o decoded_project/`]);
+    
+    const steps = [
+      `[APKTOOL] I: Using Apktool v3.0.2 on ${apktoolSelectedApk}`,
+      `[APKTOOL] I: Loading resource table...`,
+      `[APKTOOL] I: Decoding AndroidManifest.xml with resources...`,
+      `[APKTOOL] I: Loading resource table from file: /root/.local/share/apktool/framework/1.apk`,
+      `[APKTOOL] I: Regular manifest structure detected.`,
+      `[APKTOOL] I: Decoding file-resources (resources.arsc)...`,
+      `[APKTOOL] I: Decoding values */* XMLs...`,
+      `[APKTOOL] I: Baksmaliing classes.dex...`,
+      `[APKTOOL] I: Copying assets and libs...`,
+      `[APKTOOL] I: Copying unknown files...`,
+      `[APKTOOL] I: Copying original files...`,
+      `[APKTOOL] Studio: Decompile of ${apktoolSelectedApk} completed successfully.`
+    ];
+
+    for (const step of steps) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setApktoolLogs(prev => [...prev, step]);
+    }
+
+    const proj = APK_PROJECTS[apktoolSelectedApk];
+    if (proj) {
+      setApktoolEditedContents(proj.files);
+      const firstFile = Object.keys(proj.files)[0] || 'AndroidManifest.xml';
+      setApktoolSelectedFile(firstFile);
+    }
+    
+    setApktoolIsDecompiling(false);
+    setApktoolIsDecompiled(true);
+    addLog(`Apktool: Decompiled ${apktoolSelectedApk}`);
+  };
+
+  const handleApktoolRebuild = async () => {
+    setApktoolIsRebuilding(true);
+    setApktoolLogs(prev => [...prev, `[APKTOOL] apktool b decoded_project/ -o modified_${apktoolSelectedApk}`]);
+    
+    const steps = [
+      `[APKTOOL] I: Using Apktool v3.0.2`,
+      `[APKTOOL] I: Checking whether resources has modified...`,
+      `[APKTOOL] I: Smaliing smali/ folder into classes.dex...`,
+      `[APKTOOL] I: Building resources...`,
+      `[APKTOOL] I: Copying libs...`,
+      `[APKTOOL] I: Building apk file...`,
+      `[APKTOOL] Studio: Rebuild completed successfully. Output: modified_${apktoolSelectedApk}`,
+      `[SIGNER] apksigner sign --ks debug.keystore modified_${apktoolSelectedApk}`,
+      `[SIGNER] APK signed successfully with debug key.`,
+      `[ADB] adb install -r modified_${apktoolSelectedApk}`
+    ];
+
+    for (const step of steps) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setApktoolLogs(prev => [...prev, step]);
+    }
+
+    setApktoolIsRebuilding(false);
+    setApktoolIsRebuilt(true);
+    setApktoolIsSigned(true);
+    addLog(`Apktool: Rebuilt, signed and re-installed modified_${apktoolSelectedApk}`);
+    
+    const proj = APK_PROJECTS[apktoolSelectedApk];
+    if (proj && device && user) {
+      const originalApp = device.installedApps.find(a => a.packageName === proj.packageName);
+      if (originalApp) {
+        let updatedName = originalApp.name;
+        const stringsXml = apktoolEditedContents['res/values/strings.xml'];
+        if (stringsXml) {
+          const match = stringsXml.match(/<string name="app_name">([^<]+)<\/string>/);
+          if (match && match[1]) {
+            updatedName = match[1];
+          }
+        }
+        
+        const updatedApps = device.installedApps.map(a => 
+          a.packageName === proj.packageName ? { ...a, name: updatedName, version: '1.0-mod' } : a
+        );
+        const updatedDevice = { ...device, installedApps: updatedApps };
+        await setDoc(doc(db, 'devices', user.uid), updatedDevice);
+        setDevice(updatedDevice);
+        addLog(`Device Manager: Upgraded ${originalApp.name} to custom mod: ${updatedName}`);
+      }
+    }
+  };
 
 
   const bootApp = async (app: VirtualApp) => {
@@ -277,6 +380,12 @@ export default function App() {
               needsUpdate = true;
             }
 
+            const hasApktool = updatedApps.some(a => a.packageName === 'com.arkaios.apktool');
+            if (!hasApktool) {
+              updatedApps.push({ id: '8', name: 'Apktool Studio', packageName: 'com.arkaios.apktool', icon: 'Wrench', version: '1.0', status: 'stopped', lastUsed: Date.now() });
+              needsUpdate = true;
+            }
+
             const browserApp = updatedApps.find(a => a.packageName === 'com.android.browser');
             if (!browserApp) {
               updatedApps.push({ id: '3', name: 'Browser', packageName: 'com.android.browser', icon: 'Globe', version: '1.0', status: 'stopped', lastUsed: Date.now(), type: 'web', webUrl: 'https://www.google.com' });
@@ -313,7 +422,8 @@ export default function App() {
                 { id: '4', name: 'Files', packageName: 'com.android.documentsui', icon: 'Folder', version: '1.0', status: 'stopped', lastUsed: Date.now() },
                 { id: '5', name: 'DJ Portal', packageName: 'com.arkaios.djportal', icon: 'Music', version: '1.0', status: 'stopped', lastUsed: Date.now() },
                 { id: '6', name: 'System Info', packageName: 'com.arkaios.sysinfo', icon: 'Cpu', version: '1.0', status: 'stopped', lastUsed: Date.now() },
-                { id: '7', name: 'Streaming Hub', packageName: 'com.arkaios.webrtc', icon: 'Tv', version: '1.0', status: 'stopped', lastUsed: Date.now() }
+                { id: '7', name: 'Streaming Hub', packageName: 'com.arkaios.webrtc', icon: 'Tv', version: '1.0', status: 'stopped', lastUsed: Date.now() },
+                { id: '8', name: 'Apktool Studio', packageName: 'com.arkaios.apktool', icon: 'Wrench', version: '1.0', status: 'stopped', lastUsed: Date.now() }
               ],
               screenBrightness: 100,
               volume: 70,
@@ -1068,6 +1178,10 @@ ${readme}
                                   {app.icon === 'Globe' && <Globe className="w-5 h-5 text-white/40" />}
                                   {app.icon === 'Folder' && <HardDrive className="w-5 h-5 text-white/40" />}
                                   {app.icon === 'Package' && <Package className="w-5 h-5 text-blue-400/40" />}
+                                  {app.icon === 'Music' && <Music className="w-5 h-5 text-purple-400/40" />}
+                                  {app.icon === 'Cpu' && <Cpu className="w-5 h-5 text-emerald-400/40" />}
+                                  {app.icon === 'Tv' && <Tv className="w-5 h-5 text-cyan-400/40" />}
+                                  {app.icon === 'Wrench' && <Wrench className="w-5 h-5 text-orange-400/40" />}
                                 </div>
                                 <div>
                                   <div className="text-xs font-bold text-white flex items-center gap-2">
@@ -1100,7 +1214,15 @@ ${readme}
                       >
                         <div className="h-12 flex items-center justify-between px-4 border-b border-white/5">
                           <div className="flex items-center gap-2">
-                            {activeApp.icon === 'Folder' ? <HardDrive className="w-4 h-4 text-blue-400" /> : <Package className="w-4 h-4 text-blue-400" />}
+                            {activeApp.icon === 'Folder' && <HardDrive className="w-4 h-4 text-blue-400" />}
+                            {activeApp.icon === 'Settings' && <Settings className="w-4 h-4 text-zinc-400" />}
+                            {activeApp.icon === 'Terminal' && <Terminal className="w-4 h-4 text-amber-400" />}
+                            {activeApp.icon === 'Globe' && <Globe className="w-4 h-4 text-cyan-400" />}
+                            {activeApp.icon === 'Package' && <Package className="w-4 h-4 text-sky-400" />}
+                            {activeApp.icon === 'Music' && <Music className="w-4 h-4 text-purple-400" />}
+                            {activeApp.icon === 'Cpu' && <Cpu className="w-4 h-4 text-emerald-400" />}
+                            {activeApp.icon === 'Tv' && <Tv className="w-4 h-4 text-rose-400" />}
+                            {activeApp.icon === 'Wrench' && <Wrench className="w-4 h-4 text-orange-400" />}
                             <span className="text-xs font-bold">{activeApp.name}</span>
                           </div>
                           <button onClick={() => setActiveApp(null)} className="p-1 hover:bg-white/5 rounded-lg">
@@ -1798,6 +1920,298 @@ npx localtunnel --port 6080`}
                               </div>
                             </div>
                           </div>
+                        ) : activeApp.packageName === 'com.arkaios.apktool' ? (
+                          <div className="flex-1 flex flex-col md:flex-row p-4 text-left overflow-y-auto md:overflow-hidden gap-4 custom-scrollbar bg-[#0a0a0c] font-sans h-full">
+                            {/* LEFT PANEL: File Tree & Code Editor */}
+                            <div className="flex-[2] flex flex-col gap-3 min-w-[320px] h-full md:overflow-y-auto">
+                              <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                                <div>
+                                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                    <Wrench className="w-4 h-4 text-orange-400 animate-pulse" />
+                                    APKTOOL DECOMPILER STUDIO
+                                  </h3>
+                                  <p className="text-[9px] text-white/40 uppercase tracking-wider font-mono">v3.0.2 • CONNOR TUMBLESON</p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded-full text-[8px] font-mono font-bold flex items-center gap-1",
+                                    apktoolIsDecompiled ? "bg-green-500/10 text-green-400 border border-green-500/20" : "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                                  )}>
+                                    <span className={cn("w-1.5 h-1.5 rounded-full", apktoolIsDecompiled ? "bg-green-400" : "bg-orange-400")} />
+                                    {apktoolIsDecompiled ? "DECOMPILED" : "AWAITING SOURCE"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {!apktoolIsDecompiled ? (
+                                <div className="flex-1 flex flex-col items-center justify-center bg-white/5 border border-white/10 rounded-2xl p-6 text-center">
+                                  <div className="w-12 h-12 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center mb-4">
+                                    <Binary className="w-6 h-6 text-orange-400" />
+                                  </div>
+                                  <h4 className="text-sm font-bold text-white mb-2">Select Target Package for Engineering</h4>
+                                  <p className="text-xs text-white/40 mb-6 max-w-[280px] leading-relaxed">
+                                    Select any registered Android application to extract layout XMLs, resources, manifest details, and smali instruction code.
+                                  </p>
+
+                                  <div className="w-full max-w-[300px] space-y-4">
+                                    <div className="space-y-1.5 text-left">
+                                      <label className="text-[9px] font-mono text-white/40 uppercase tracking-wider block">Target APK Package</label>
+                                      <select 
+                                        value={apktoolSelectedApk}
+                                        onChange={(e) => setApktoolSelectedApk(e.target.value)}
+                                        className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-orange-500/50"
+                                      >
+                                        <option value="com.arkaios.djportal.apk">com.arkaios.djportal.apk (DJ Portal)</option>
+                                        <option value="com.android.browser.apk">com.android.browser.apk (Browser)</option>
+                                      </select>
+                                    </div>
+
+                                    <button
+                                      onClick={handleApktoolDecompile}
+                                      disabled={apktoolIsDecompiling}
+                                      className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-orange-500/50 text-white font-bold rounded-xl text-xs shadow-lg shadow-orange-500/20 transition-all flex items-center justify-center gap-2"
+                                    >
+                                      {apktoolIsDecompiling ? (
+                                        <>
+                                          <RefreshCcw className="w-4 h-4 animate-spin" />
+                                          EXTRACTING BINARY XMLs...
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Hammer className="w-4 h-4" />
+                                          DECOMPILE PACKAGE
+                                        </>
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex-1 flex flex-col md:flex-row gap-3 min-h-[400px]">
+                                  {/* Left sub-panel: File Tree */}
+                                  <div className="w-full md:w-[180px] bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col gap-2">
+                                    <div className="text-[9px] font-mono text-white/40 uppercase tracking-widest flex items-center gap-1 border-b border-white/5 pb-2">
+                                      <FolderTree className="w-3.5 h-3.5 text-orange-400" />
+                                      Project Tree
+                                    </div>
+                                    <div className="flex-1 space-y-1 overflow-y-auto custom-scrollbar text-[11px] font-mono text-white/70 text-left">
+                                      {Object.keys(apktoolEditedContents).map((filePath) => {
+                                        const isSelected = apktoolSelectedFile === filePath;
+                                        return (
+                                          <button
+                                            key={filePath}
+                                            onClick={() => setApktoolSelectedFile(filePath)}
+                                            className={cn(
+                                              "w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 transition-all group",
+                                              isSelected ? "bg-orange-500/10 text-orange-400 border border-orange-500/20 font-bold" : "hover:bg-white/5 border border-transparent text-white/60"
+                                            )}
+                                          >
+                                            <FileCode className={cn("w-3.5 h-3.5", isSelected ? "text-orange-400" : "text-white/40 group-hover:text-white/60")} />
+                                            <span className="truncate">{filePath}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <button
+                                      onClick={() => {
+                                        setApktoolIsDecompiled(false);
+                                        setApktoolLogs(prev => [...prev, "[SYSTEM] Closed decoded project root."]);
+                                      }}
+                                      className="py-1 px-2 border border-white/10 rounded-lg text-[9px] font-bold text-white/40 hover:text-white/80 hover:bg-white/5 transition-all text-center w-full mt-2"
+                                    >
+                                      Change APK
+                                    </button>
+                                  </div>
+
+                                  {/* Right sub-panel: Code Editor */}
+                                  <div className="flex-1 flex flex-col bg-black/60 border border-white/10 rounded-2xl overflow-hidden">
+                                    <div className="bg-black/80 px-4 py-2 flex justify-between items-center border-b border-white/10">
+                                      <span className="text-[10px] font-mono text-orange-400 font-bold flex items-center gap-1.5">
+                                        <Code2 className="w-3.5 h-3.5" />
+                                        {apktoolSelectedFile}
+                                      </span>
+                                      <span className="text-[8px] font-mono text-white/30 uppercase">LIVE RE-WRITING</span>
+                                    </div>
+                                    <textarea
+                                      value={apktoolEditedContents[apktoolSelectedFile] || ''}
+                                      onChange={(e) => {
+                                        const newContent = e.target.value;
+                                        setApktoolEditedContents(prev => ({
+                                          ...prev,
+                                          [apktoolSelectedFile]: newContent
+                                        }));
+                                      }}
+                                      className="flex-1 p-4 bg-black/20 text-green-400 font-mono text-xs focus:outline-none resize-none custom-scrollbar leading-relaxed text-left"
+                                      spellCheck={false}
+                                    />
+                                    <div className="bg-black/60 px-3 py-1.5 border-t border-white/5 flex justify-between items-center text-[9px] text-white/40 font-mono">
+                                      <span>Lines: {(apktoolEditedContents[apktoolSelectedFile] || '').split('\n').length}</span>
+                                      <span className="text-orange-500/80">Auto-saved to temporary buffer</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* RIGHT PANEL: Compilation Controls, Terminal, and About */}
+                            <div className="flex-1 flex flex-col gap-3 min-w-[300px] h-full md:overflow-y-auto">
+                              {/* Tab Selector */}
+                              <div className="flex bg-white/5 border border-white/10 rounded-xl overflow-hidden p-0.5">
+                                <button
+                                  onClick={() => setApktoolActiveTab('decompile')}
+                                  className={cn(
+                                    "flex-1 py-1.5 text-[9px] font-bold tracking-wider uppercase rounded-lg transition-all",
+                                    apktoolActiveTab === 'decompile' ? "bg-orange-500 text-white" : "text-white/40 hover:text-white"
+                                  )}
+                                >
+                                  Console
+                                </button>
+                                <button
+                                  onClick={() => setApktoolActiveTab('rebuild')}
+                                  className={cn(
+                                    "flex-1 py-1.5 text-[9px] font-bold tracking-wider uppercase rounded-lg transition-all",
+                                    apktoolActiveTab === 'rebuild' ? "bg-orange-500 text-white" : "text-white/40 hover:text-white"
+                                  )}
+                                >
+                                  Rebuild & Sign
+                                </button>
+                                <button
+                                  onClick={() => setApktoolActiveTab('about')}
+                                  className={cn(
+                                    "flex-1 py-1.5 text-[9px] font-bold tracking-wider uppercase rounded-lg transition-all",
+                                    apktoolActiveTab === 'about' ? "bg-orange-500 text-white" : "text-white/40 hover:text-white"
+                                  )}
+                                >
+                                  About
+                                </button>
+                              </div>
+
+                              {/* TAB CONTENT: Console (Command Logs) */}
+                              {apktoolActiveTab === 'decompile' && (
+                                <div className="flex-1 bg-black border border-white/10 rounded-2xl p-4 flex flex-col font-mono text-[10px] text-orange-400 min-h-[220px]">
+                                  <div className="flex justify-between items-center border-b border-white/5 pb-2 mb-2">
+                                    <span className="text-white/40 text-[9px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                                      <Terminal className="w-3.5 h-3.5 text-orange-400" />
+                                      Apktool stdout
+                                    </span>
+                                    <button 
+                                      onClick={() => setApktoolLogs(["[APKTOOL] Studio cleared."])}
+                                      className="text-[9px] text-red-400/60 hover:text-red-400 font-bold uppercase"
+                                    >
+                                      Clear
+                                    </button>
+                                  </div>
+                                  <div className="flex-1 overflow-y-auto space-y-1.5 custom-scrollbar text-left font-mono">
+                                    {apktoolLogs.map((log, index) => (
+                                      <div key={index} className="leading-relaxed">
+                                        {log}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* TAB CONTENT: Rebuild & Sign */}
+                              {apktoolActiveTab === 'rebuild' && (
+                                <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-4 min-h-[220px]">
+                                  <div className="text-left">
+                                    <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-1">REBUILD COMPILER STAGE</h4>
+                                    <p className="text-[10px] text-white/40 leading-relaxed">
+                                      Smali-recompile instruction code, compress resources to APK, apply digital debug signature, and hot-install.
+                                    </p>
+                                  </div>
+
+                                  <div className="bg-black/40 border border-white/5 rounded-xl p-3 text-left space-y-2">
+                                    <div className="flex justify-between items-center text-[9px] font-mono text-white/50 border-b border-white/5 pb-1">
+                                      <span>COMPILER DETAILS</span>
+                                      <span className="text-green-400 font-bold">READY</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 text-[9px] font-mono">
+                                      <div>
+                                        <span className="text-white/30">Min SDK:</span> <span className="text-white/80">21 (Android 5.0)</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-white/30">Target SDK:</span> <span className="text-white/80">34 (Android 14)</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-white/30">Signature:</span> <span className="text-white/80">V2 + V3 Schema</span>
+                                      </div>
+                                      <div>
+                                        <span className="text-white/30">AAPT version:</span> <span className="text-white/80">AAPT2 daemon</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {apktoolIsRebuilt && (
+                                    <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3 flex gap-2 items-start text-left animate-fade-in">
+                                      <CheckCircle className="w-4 h-4 text-green-400 mt-0.5 flex-shrink-0" />
+                                      <div className="space-y-0.5">
+                                        <p className="text-[10px] font-bold text-green-400 uppercase">MODIFIED APK COMPILED & SIGNED</p>
+                                        <p className="text-[9px] text-white/60">
+                                          App re-signed and hot-installed on device. Launch it to see your modified changes live!
+                                        </p>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <button
+                                    onClick={handleApktoolRebuild}
+                                    disabled={!apktoolIsDecompiled || apktoolIsRebuilding}
+                                    className="w-full mt-auto py-2.5 bg-orange-500 hover:bg-orange-600 disabled:bg-white/5 disabled:text-white/20 disabled:border-transparent text-white border border-transparent font-bold rounded-xl text-xs shadow-lg shadow-orange-500/10 transition-all flex items-center justify-center gap-2"
+                                  >
+                                    {apktoolIsRebuilding ? (
+                                      <>
+                                        <RefreshCcw className="w-4 h-4 animate-spin" />
+                                        REBUILDING CLASSES.DEX...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Hammer className="w-4 h-4" />
+                                        RECOMPILE & SIGN APK
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* TAB CONTENT: About Official Apktool */}
+                              {apktoolActiveTab === 'about' && (
+                                <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col text-left gap-3 overflow-y-auto custom-scrollbar min-h-[220px]">
+                                  <div className="flex items-center gap-3 border-b border-white/5 pb-2">
+                                    <div className="w-8 h-8 rounded-full bg-orange-500/15 flex items-center justify-center">
+                                      <Heart className="w-4 h-4 text-orange-400 fill-orange-400/10" />
+                                    </div>
+                                    <div>
+                                      <h4 className="text-xs font-bold text-white font-mono uppercase">Connor Tumbleson</h4>
+                                      <p className="text-[8px] text-white/30">Official Developer & Author</p>
+                                    </div>
+                                  </div>
+
+                                  <p className="text-[9px] text-white/60 leading-relaxed font-mono">
+                                    Apktool is a powerful suite for reverse engineering third-party, closed, binary, Android apps. It can decode resources to nearly original form and rebuild them after making some modifications; it makes it possible to debug smali code step-by-step.
+                                  </p>
+
+                                  <div className="space-y-1.5 p-2 bg-black/40 border border-white/5 rounded-xl text-[9px] font-mono">
+                                    <div className="flex justify-between">
+                                      <span className="text-white/30">GitHub:</span>
+                                      <a href="https://github.com/iBotPeaches/Apktool" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">iBotPeaches/Apktool</a>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-white/30">Official Site:</span>
+                                      <a href="https://apktool.org" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">apktool.org</a>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span className="text-white/30">Patreon:</span>
+                                      <a href="https://www.patreon.com/HackUnderway" target="_blank" rel="noreferrer" className="text-orange-400 hover:underline">HackUnderway</a>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-[8px] text-white/30 italic bg-white/5 p-2 rounded-lg border border-white/5">
+                                    "Apktool is NOT intended for piracy and other non-legal uses. It is intended for localization, adding custom layouts, and auditing your own apps."
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         ) : activeApp.type === 'web' ? (
                           <div className="flex-1 bg-white flex flex-col relative">
                             {/* App Header for Capacitor Apps (Minimal) */}
@@ -2032,6 +2446,9 @@ npx localtunnel --port 6080`}
                               {app.icon === 'Folder' && <HardDrive className="w-6 h-6 text-white/60" />}
                               {app.icon === 'Package' && <Package className="w-6 h-6 text-blue-400/60" />}
                               {app.icon === 'Music' && <Music className="w-6 h-6 text-purple-400/60" />}
+                              {app.icon === 'Cpu' && <Cpu className="w-6 h-6 text-emerald-400/60" />}
+                              {app.icon === 'Tv' && <Tv className="w-6 h-6 text-cyan-400/60" />}
+                              {app.icon === 'Wrench' && <Wrench className="w-6 h-6 text-orange-400/60" />}
                               
                               <button 
                                 onClick={(e) => {
